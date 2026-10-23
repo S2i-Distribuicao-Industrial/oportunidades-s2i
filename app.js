@@ -534,12 +534,12 @@ function paneConta(p){
   p.innerHTML=`<header><span class="eyebrow">${ebr(2,1)}</span><h2>Cliente final (conta)</h2><p class="muted">No portal, procure primeiro o nome em “Pesquisar Nome da conta”. Se a conta já existir, o portal preenche sozinho; senão use os dados abaixo.</p></header>
   ${Object.keys(CAD.clientes).length?`<div class="quick"><label for="qCli"><b>Cliente salvo:</b></label><select id="qCli"><option value="">Escolher para preencher tudo…</option>${byUse(CAD.clientes).map(([k,c])=>`<option value="${k}">${esc(clienteLabel(c))}</option>`).join("")}</select></div>`:""}
   <div class="grid">
-    ${field("conta.cnpj","CNPJ do cliente final",{req:1,fmt:"cnpj",ph:"00.000.000/0000-00",hint:"Pedido no final do formulário (“Informe o CNPJ do Cliente Final”)."})}
+    ${field("conta.cnpj","CNPJ do cliente final",{fmt:"cnpj",ph:"00.000.000/0000-00",hint:"Pedido no final do formulário (“Informe o CNPJ do Cliente Final”)."})}
     ${field("conta.nome","Nome da conta",{req:1,max:80,hint:"Razão social ou nome fantasia, como aparece no CNPJ."})}
-    ${field("conta.endereco","Endereço",{req:1,max:80,full:1,ph:"Rua, número, bairro"})}
+    ${field("conta.endereco","Endereço",{max:80,full:1,ph:"Rua, número, bairro"})}
     ${field("conta.cidade","Cidade",{req:1,max:80})}
-    ${field("conta.uf","Estado",{req:1,type:"uf"})}
-    ${field("conta.cep","CEP",{req:1,fmt:"cep",ph:"00000-000"})}
+    ${field("conta.uf","Estado",{type:"uf"})}
+    ${field("conta.cep","CEP",{fmt:"cep",ph:"00000-000"})}
     <div class="f"><label>País</label><input value="Brasil" disabled></div>
   </div>`;
   bind(p,el=>{ if(el.dataset.b==="conta.cnpj"&&digits(cur.conta.cnpj).length===14){const k="c"+digits(cur.conta.cnpj);
@@ -556,14 +556,14 @@ function paneContato(p){
     ${field("contato.email","E-mail",{req:1,type:"email"})}
     ${field("contato.telefone","Telefone",{req:1,type:"tel",fmt:"tel",ph:"(62) 99999-9999"})}
     ${field("contato.cargo","Cargo / função",{hint:"Não vai para o portal; entra na descrição (quem decide)."})}
-    ${field("contato.endereco","Endereço do contato",{req:1,max:255,hint:"Normalmente o mesmo da conta.",full:1})}
+    ${field("contato.endereco","Endereço do contato",{max:255,hint:"Normalmente o mesmo da conta.",full:1})}
     <div class="f full"><label class="check"><input type="checkbox" data-b="projeto.mesmo" ${cur.projeto.mesmo?"checked":""}> O projeto/obra fica no mesmo endereço da conta</label></div>
   </div>
   <div class="grid" id="pj" ${cur.projeto.mesmo?"hidden":""}>
-    ${field("projeto.endereco","Endereço do projeto final",{req:1,max:80,full:1})}
-    ${field("projeto.cidade","Cidade do projeto",{req:1,max:80})}
-    ${field("projeto.uf","Estado do projeto",{req:1,type:"uf"})}
-    ${field("projeto.cep","CEP do projeto",{req:1,fmt:"cep"})}
+    ${field("projeto.endereco","Endereço do projeto final",{max:80,full:1})}
+    ${field("projeto.cidade","Cidade do projeto",{max:80})}
+    ${field("projeto.uf","Estado do projeto",{type:"uf"})}
+    ${field("projeto.cep","CEP do projeto",{fmt:"cep"})}
   </div>
   <div class="row"><button class="btn small ghost" id="cpEnd">Copiar endereço da conta para o contato</button></div>`;
   bind(p,el=>{if(el.dataset.b==="projeto.mesmo")$("#pj").hidden=cur.projeto.mesmo;});
@@ -572,12 +572,12 @@ function paneContato(p){
 /* ---------- 4 parceiro / usuário final ---------- */
 function partyFields(base,titulo,extra){
   return `<h3>${titulo}</h3><div class="grid">
-    ${field(base+".nome","Nome da conta",{req:1,max:80})}${field(base+".cnpj","CNPJ",{fmt:"cnpj",hint:"Para sua conferência."})}
-    ${field(base+".endereco","Endereço",{req:1,max:80,full:1})}
-    ${field(base+".cidade","Cidade",{req:1,max:80})}${field(base+".uf","Estado",{type:"uf",req:1})}
-    ${field(base+".cep","CEP",{req:1,fmt:"cep"})}<span></span>
-    ${field(base+".contatoNome","Nome do contato",{req:1,max:80})}${field(base+".contatoSobrenome","Sobrenome",{req:1,max:80})}
-    ${field(base+".email","E-mail",{req:1,type:"email"})}${field(base+".telefone","Telefone",{req:1,fmt:"tel"})}
+    ${field(base+".nome","Nome da conta",{max:80})}${field(base+".cnpj","CNPJ",{fmt:"cnpj",hint:"Para sua conferência."})}
+    ${field(base+".endereco","Endereço",{max:80,full:1})}
+    ${field(base+".cidade","Cidade",{max:80})}${field(base+".uf","Estado",{type:"uf"})}
+    ${field(base+".cep","CEP",{fmt:"cep"})}<span></span>
+    ${field(base+".contatoNome","Nome do contato",{max:80})}${field(base+".contatoSobrenome","Sobrenome",{max:80})}
+    ${field(base+".email","E-mail",{type:"email"})}${field(base+".telefone","Telefone",{fmt:"tel"})}
     ${extra||""}</div>`;
 }
 function paneParceiro(p){
@@ -600,7 +600,7 @@ function paneProjeto(p){
     ${field("oportunidade.escopo","Escopo / o que vai ser fornecido",{ph:"Ex.: 12 inversores ATV320 + CLP M221 para linha de curtimento"})}
     ${field("oportunidade.aplicacao","Aplicação / segmento",{ph:"Ex.: Couro, alimentos, saneamento, data center…"})}
     ${field("oportunidade.dataCotacao","Data prevista para a cotação",{type:"date",hint:"Quando você vai pedir preço ao fabricante."})}
-    ${field("oportunidade.dataPedido","Data esperada do pedido",{type:"date",req:1,hint:"Quando o cliente deve fechar."})}
+    ${field("oportunidade.dataPedido","Data esperada do pedido",{type:"date",hint:"Quando o cliente deve fechar."})}
     ${cur.temParceiro?field("oportunidade.palavraChave","Palavra-chave do parceiro",{hint:"Com integrador: informe a palavra-chave a usar."})
       :`<div class="f"><label>Palavra-chave do parceiro</label><input type="text" value="${esc(cur.conta.nome)}" disabled><span class="hint">Sem integrador, é o nome da conta (preenchido sozinho).</span></div>`}
     ${field("oportunidade.concorrentes","Concorrentes na disputa",{ph:"Ex.: WEG, Siemens, ABB"})}
@@ -862,16 +862,15 @@ function buildPack(o){
 
 
 /* o mínimo que o vendedor precisa informar para enviar */
-function faltasVendedor(o){
-  const F=[];
-  if(!o.fabricanteId) F.push([0,"Fabricante"]);
-  if(!o.conta.nome.trim()) F.push([1,"Nome do cliente"]);
-  if(!o.contato.nome.trim()) F.push([2,"Nome do contato"]);
-  if(!o.contato.email.trim()&&!o.contato.telefone.trim()) F.push([2,"E-mail ou telefone do contato"]);
-  if(o.temParceiro&&!o.parceiro.nome.trim()) F.push([3,"Nome do parceiro"]);
-  if(!o.oportunidade.nomeProjeto.trim()) F.push([4,"Nome do projeto"]);
-  if(!o.oportunidade.dataPedido) F.push([4,"Data esperada do pedido"]);
-  if(!o.linhas.some(l=>l.produto&&+l.valor>0)&&!o.itens.length) F.push([5,"Pelo menos um item ou uma linha de produto"]);
+function faltasVendedor(o){ // obrigatórios para enviar (o resto o administrador completa)
+  const F=[], v=x=>String(x||"").trim();
+  if(!v(o.conta.nome)) F.push([1,"Nome da conta"]);
+  if(!v(o.conta.cidade)) F.push([1,"Cidade"]);
+  if(!v(o.contato.nome)) F.push([2,"Nome do contato principal"]);
+  if(!v(o.contato.sobrenome)) F.push([2,"Sobrenome do contato"]);
+  if(!v(o.contato.telefone)) F.push([2,"Telefone"]);
+  if(!v(o.contato.email)) F.push([2,"E-mail"]);
+  if(!v(o.oportunidade.nomeProjeto)) F.push([4,"Nome do projeto"]);
   return F;
 }
 
@@ -894,7 +893,7 @@ function paneRevisao(p){
   if((st==="rascunho"||st==="devolvida")&&(meu||lanca)){
     fluxo=`<div class="card fluxo" data-keep><h3>Enviar para lançamento</h3>
       <p class="muted" style="margin:0;font-size:13px">A oportunidade vai para a caixa de pendentes do administrador, que confere, completa e lança no portal ${esc(fab?fab.nome:"")}. Depois de enviada você só acompanha.</p>
-      ${falta.length?`<div class="note warn"><b>Para enviar, falta:</b> ${falta.map(([s,t])=>`<a href="#" data-go="${s}">${esc(t)}</a>`).join(", ")}.</div>`:""}
+      ${falta.length?`<div class="note bad"><b>Para enviar, preencha:</b> ${falta.map(([s,t])=>`<a href="#" data-go="${s}">${esc(t)}</a>`).join(", ")}.</div>`:`<p class="muted" style="margin:0;font-size:13px">Os campos obrigatórios estão preenchidos. O que mais faltar (lista acima) o administrador completa.</p>`}
       <div class="f"><label for="obsV">Recado para o administrador (opcional)</label><textarea id="obsV" style="min-height:60px" placeholder="Ex.: cliente pediu urgência; o CNPJ eu confirmo amanhã."></textarea></div>
       <div class="row"><button class="btn pri" id="btnEnviar" ${falta.length?"disabled":""}>Enviar para lançamento</button>
       ${meu?`<button class="btn ghost danger" id="btnCancelar">Cancelar oportunidade</button><button class="btn ghost danger" id="btnExcluir">Excluir</button>`:""}</div></div>`;
@@ -978,7 +977,10 @@ function verAntigos(){
   const box=$("#antigos"); if(!box) return;
   let n=0; try{ n=(JSON.parse(localStorage.getItem("oportunidades_s2i_v1"))||[]).length; }catch(e){}
   box.innerHTML=`${n?`<button class="btn small ghost" id="btnAnt">Trazer ${n} oportunidade(s) deste navegador</button>`:""}<label class="btn small ghost" for="impFile">Importar backup antigo</label><input type="file" id="impFile" accept=".json" hidden>`;
-  const send=async(list,cads)=>{try{const r=await api("POST","importar_backup",{ops:list,cadastros:cads});toast(r.oportunidades+" oportunidade(s) importadas");
+  const send=async(list,cads)=>{try{
+    list=(list||[]).map(o=>Object.assign({},o,{fabricanteId:o.fabricanteId||fabPadrao()})); // versão 1 não tinha fabricante: entra como Schneider
+    Object.values((cads||{}).clientes||{}).forEach(c=>{if(c&&!c.fabricanteId)c.fabricanteId=fabPadrao();});
+    const r=await api("POST","importar_backup",{ops:list,cadastros:cads});toast(r.oportunidades+" oportunidade(s) importadas");
     const c=await api("GET","cadastros");CAD=Object.assign({clientes:{},parceiros:{},contatosSE:{}},c);await loadList(false);}catch(e){falha(e);}};
   const a=$("#btnAnt"); if(a) a.onclick=async()=>{let o=[],c={};try{o=JSON.parse(localStorage.getItem("oportunidades_s2i_v1"))||[];c=JSON.parse(localStorage.getItem("cadastros_s2i_v1"))||{};}catch(e){}
     await send(o,c); try{localStorage.setItem("oportunidades_s2i_v1_migrado",localStorage.getItem("oportunidades_s2i_v1"));localStorage.removeItem("oportunidades_s2i_v1");}catch(e){} verAntigos();};
