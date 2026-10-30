@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Oportunidades S2I – mySchneider",
+  "version": "2.0",
+  "description": "Leva os dados do site de oportunidades da S2I para o formulário de Registro Único do mySchneider com um clique.",
+  "permissions": ["scripting"],
+  "host_permissions": ["https://www.se.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    { "matches": ["https://www.se.com/*"], "js": ["portal.js"], "run_at": "document_idle" },
+    { "matches": ["http://*/*", "https://*/*", "file:///*"], "js": ["ponte.js"], "run_at": "document_start" }
+  ]
+}

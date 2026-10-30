@@ -87,7 +87,7 @@ async function api(method,path,body){
   for(let tent=0;tent<3;tent++){
     try{
       r=await fetch(API_URL,{method:"POST",redirect:"follow",headers:{"Content-Type":"text/plain;charset=utf-8"},
-        body:JSON.stringify({m:method,p,q,b:body===undefined?null:body,t:TOKEN})});
+        body:JSON.stringify({m:method,p,q,b:body===undefined?null:body,t:TOKEN,s:location.origin+location.pathname})});
       j=await r.json();
       if(j&&j.s===503&&tent<2){await new Promise(res=>setTimeout(res,1500*(tent+1)));continue;}
       break;
@@ -106,7 +106,7 @@ function falha(e){ if(e&&e.status===401) return; toast(e&&e.message?e.message:"A
 
 /* ===================== login ===================== */
 function showLogin(msg){
-  ME=null; $("#app").hidden=true; $("#login").hidden=false;
+  ME=null; const vs=document.getElementById("view-sol"); if(vs){vs.innerHTML="";delete vs.dataset.u;} $("#app").hidden=true; $("#login").hidden=false;
   $("#lgErr").textContent=msg||""; $("#lgErr").hidden=!msg;
   setTimeout(()=>($("#lgUser").value?$("#lgPass"):$("#lgUser")).focus(),50);
 }
@@ -142,17 +142,20 @@ async function boot(doLogin){ BOOT_LOGIN=!!doLogin;
   try{ eu=await api("GET","eu"); }catch(e){ if(e.status!==401) showLogin(e.message); return; }
   ME=eu.usuario; PERM_NOMES=eu.permissoes; PAPEIS=eu.papeis;
   $("#login").hidden=true; $("#app").hidden=false;
-  $("#meNome").textContent=ME.nome; $("#mePapel").textContent=ME.papel==="admin"?"Administrador":"Vendedor";
+  $("#meNome").textContent=ME.nome; $("#mePapel").textContent=ME.papel==="admin"?"Administrador":ME.papel==="integrador"?("Integrador"+(ME.empresa?" · "+ME.empresa:"")):"Vendedor";
   if(ME.trocarSenha){ trocarSenha(true); return; }
   startApp();
 }
 async function startApp(){
   try{
-    const [f,c,u]=await Promise.all([api("GET","fabricantes"),api("GET","cadastros"),api("GET","usuarios")]);
+    const integ=ME.papel==="integrador";
+    const [f,c,u]=await Promise.all([api("GET","fabricantes"),integ?Promise.resolve({}):api("GET","cadastros"),api("GET","usuarios")]);
     FABS=f; CAD=Object.assign({clientes:{},parceiros:{},contatosSE:{}},c); USERS=u;
   }catch(e){ falha(e); return; }
   if(!ME) return;
   document.querySelectorAll("[data-perm]").forEach(el=>{el.hidden=!el.dataset.perm.split("|").some(can);});
+  document.querySelectorAll("[data-interno]").forEach(el=>{el.hidden=ME.papel==="integrador";});
+  $("#tabs").hidden=document.querySelectorAll("#tabs button:not([hidden])").length<2;
   const cx=[["minhas","Minhas"]];
   if(can("lancar")) cx.push(["pendentes","Pendentes"]);
   if(can("lancar")||can("ver_todas")) cx.push(["concluidas","Concluídas"],["todas","Todas"]);
@@ -161,9 +164,10 @@ async function startApp(){
   await contagem();
   const cxSalva=lsGet("caixa_"+ME.id);
   caixa=cx.some(x=>x[0]===cxSalva)?cxSalva:(can("lancar")&&COUNTS.pendentes>0?"pendentes":"minhas");
-  irView(BOOT_LOGIN?"ops":(lsGet("view_"+ME.id)||"ops"), true);
-  await loadList(true);
-  if(ME) verAntigos();
+  const hashSol=/^#sol-([A-Za-z0-9_-]{4,40})$/.exec(location.hash||"");
+  const inicial=ME.papel==="integrador"?"sol":(hashSol&&(can("orcamentos")||can("solicitar"))?"sol":(BOOT_LOGIN?"ops":(lsGet("view_"+ME.id)||"ops")));
+  if(ME.papel!=="integrador"){ irView(inicial==="sol"?"ops":inicial, true); await loadList(true); if(ME) verAntigos(); }
+  if(inicial==="sol"&&ME){ irView("sol",true); if(hashSol){ await sChain; await abrirSol(hashSol[1]); history.replaceState(null,"",location.pathname+location.search); } }
 }
 let contT=null, COUNTS={pendentes:0,devolvidas:0};
 async function contagem(){
@@ -173,6 +177,8 @@ async function contagem(){
     const bp=$('[data-badge="pendentes"]'); if(bp){bp.dataset.n=c.pendentes;bp.textContent=c.pendentes;bp.hidden=!c.pendentes;}
     const bm=$('[data-badge="minhas"]'); if(bm){bm.dataset.n=c.devolvidas;bm.textContent=c.devolvidas;bm.hidden=!c.devolvidas;bm.title="Devolvidas para corrigir";}
     const tb=$("#tabBadge"); const n=(can("lancar")?c.pendentes:0)+c.devolvidas; tb.textContent=n; tb.hidden=!n;
+    const ts=$("#tabBadgeSol"); const ns=(c.solNovas||0)+(c.solAguardando||0); ts.textContent=ns; ts.hidden=!ns;
+    if(typeof badgesSol==="function") badgesSol();
   }catch(e){}
   contT=setTimeout(contagem,60000);
 }
@@ -180,7 +186,7 @@ async function contagem(){
 /* ===================== navegação ===================== */
 function irView(v, inicial){
   const b=document.querySelector(`#tabs button[data-view="${v}"]`);
-  if(!b||b.hidden) v="ops";
+  if(!b||b.hidden){ const pri=document.querySelector("#tabs button[data-view]:not([hidden])"); v=pri?pri.dataset.view:"ops"; }
   view=v;
   document.querySelectorAll("#tabs button[data-view]").forEach(x=>x.setAttribute("aria-selected",x.dataset.view===v?"true":"false"));
   document.querySelectorAll("[data-pane]").forEach(s=>s.hidden=s.dataset.pane!==v);
@@ -191,6 +197,7 @@ function irView(v, inicial){
   if(v==="usr") renderUsuarios();
   if(v==="fab") renderFabricantes();
   if(v==="rel") renderRelatorios();
+  if(v==="sol") renderSolView();
   if(v==="ops"&&!inicial) loadList();
 }
 $("#tabs").addEventListener("click",e=>{const b=e.target.closest("button[data-view]");if(b){flush();irView(b.dataset.view);}});
@@ -1031,7 +1038,7 @@ async function renderUsuarios(){
     <p class="muted" style="margin:0"><b>Vendedor</b> preenche e envia as próprias oportunidades. <b>Administrador</b> vê as pendentes, lança no portal e cuida do sistema. Ajuste as permissões de cada um se precisar.</p>
     <div id="uForm"></div>
     <div class="tablewrap"><table><thead><tr><th>Nome</th><th>Login</th><th>Papel</th><th>Permissões</th><th>Situação</th><th>Último acesso</th><th></th></tr></thead><tbody>
-    ${USERS.map(u=>`<tr><td><b>${esc(u.nome)}</b>${u.email?`<div class="muted" style="font-size:12px">${esc(u.email)}</div>`:""}</td><td class="mono">${esc(u.login)}</td><td>${u.papel==="admin"?"Administrador":"Vendedor"}</td><td><div class="chips">${chips(u)}</div></td>
+    ${USERS.map(u=>`<tr><td><b>${esc(u.nome)}</b>${u.email?`<div class="muted" style="font-size:12px">${esc(u.email)}</div>`:""}</td><td class="mono">${esc(u.login)}</td><td>${u.papel==="admin"?"Administrador":u.papel==="integrador"?"Integrador"+(u.empresa?`<div class="muted" style="font-size:12px">${esc(u.empresa)}</div>`:""):"Vendedor"}</td><td><div class="chips">${chips(u)}</div></td>
       <td><span class="pill ${u.ativo?"concluida":"cancelada"}">${u.ativo?"Ativo":"Inativo"}</span>${u.trocarSenha?'<div class="muted" style="font-size:11px">troca senha no próximo acesso</div>':""}</td><td>${fmtDH(u.ultimoAcesso)}</td>
       <td><button class="btn small ghost" data-ued="${u.id}">Editar</button></td></tr>`).join("")}</tbody></table></div></section></div>`;
   $("#uNovo").onclick=()=>formUsuario(null);
@@ -1044,7 +1051,8 @@ function formUsuario(u){
       <div class="f"><label for="uNome">Nome</label><input type="text" id="uNome" value="${esc(u.nome)}" required></div>
       <div class="f"><label for="uLogin">Login</label><input type="text" id="uLogin" value="${esc(u.login)}" ${novo?"":"disabled"} required pattern="[A-Za-z0-9._\\-]{3,40}" placeholder="ex.: joao.silva"><span class="hint">Usado para entrar. Sem espaços.</span></div>
       <div class="f"><label for="uEmail">E-mail</label><input type="email" id="uEmail" value="${esc(u.email)}"></div>
-      <div class="f"><label for="uPapel">Papel</label><select id="uPapel"><option value="vendedor" ${u.papel==="vendedor"?"selected":""}>Vendedor</option><option value="admin" ${u.papel==="admin"?"selected":""}>Administrador</option></select><span class="hint">Mudar o papel marca as permissões padrão.</span></div>
+      <div class="f"><label for="uPapel">Papel</label><select id="uPapel"><option value="vendedor" ${u.papel==="vendedor"?"selected":""}>Vendedor</option><option value="admin" ${u.papel==="admin"?"selected":""}>Administrador</option><option value="integrador" ${u.papel==="integrador"?"selected":""}>Integrador (externo)</option></select><span class="hint">Mudar o papel marca as permissões padrão. Integrador só vê as próprias solicitações de orçamento.</span></div>
+      <div class="f" id="uEmpBox" ${u.papel==="integrador"?"":"hidden"}><label for="uEmp">Empresa do integrador</label><input type="text" id="uEmp" value="${esc(u.empresa||"")}" placeholder="Ex.: Painéis Goiás Ltda"><span class="hint">Pessoas da mesma empresa veem as solicitações umas das outras.</span></div>
       <div class="f full"><label>Permissões</label><div class="perms">${Object.entries(PERM_NOMES).map(([k,t])=>`<label class="check"><input type="checkbox" data-pm="${k}" ${u.perms.includes(k)?"checked":""}> ${esc(t)}</label>`).join("")}</div>
         <span class="hint">Todos podem criar e enviar as próprias oportunidades.</span></div>
       ${novo?`<div class="f"><label for="uSenha">Senha inicial</label><input type="text" id="uSenha" placeholder="Deixe vazio para gerar uma"><span class="hint">O usuário troca no primeiro acesso.</span></div>`
@@ -1054,14 +1062,14 @@ function formUsuario(u){
     <div class="row" style="justify-content:space-between"><div class="row">${novo?"":`<button type="button" class="btn ghost" id="uReset">Redefinir senha</button>`}</div>
       <div class="row"><button type="button" class="btn ghost" id="uX">Fechar</button><button class="btn pri">${novo?"Criar usuário":"Salvar"}</button></div></div></form>`;
   box.scrollIntoView({behavior:"smooth",block:"start"});
-  $("#uPapel").onchange=()=>{const ps=PAPEIS[$("#uPapel").value]||[];box.querySelectorAll("[data-pm]").forEach(c=>c.checked=ps.includes(c.dataset.pm));};
+  $("#uPapel").onchange=()=>{const pp=$("#uPapel").value,ps=PAPEIS[pp]||[];box.querySelectorAll("[data-pm]").forEach(c=>c.checked=ps.includes(c.dataset.pm));$("#uEmpBox").hidden=pp!=="integrador";};
   $("#uX").onclick=()=>box.innerHTML="";
   const msg=t=>{const m=$("#uMsg");m.innerHTML=t;m.hidden=false;};
   const r=$("#uReset"); if(r) r.onclick=async()=>{ if(!r.dataset.ok){r.dataset.ok=1;r.textContent="Confirmar: gerar senha nova";return;}
     try{const x=await api("POST","usuarios/"+u.id+"/senha",{});msg(`Senha nova de <b>${esc(u.login)}</b>: <span class="mono big">${esc(x.senha)}</span><br>Passe para o usuário. Ele troca no próximo acesso.`);}catch(e){falha(e);} };
   $("#uF").onsubmit=async e=>{e.preventDefault();
     const perms=[...box.querySelectorAll("[data-pm]:checked")].map(c=>c.dataset.pm);
-    const b={nome:$("#uNome").value.trim(),email:$("#uEmail").value.trim(),papel:$("#uPapel").value,perms};
+    const b={nome:$("#uNome").value.trim(),email:$("#uEmail").value.trim(),papel:$("#uPapel").value,perms,empresa:$("#uEmp").value.trim()};
     try{
       if(novo){ b.login=$("#uLogin").value.trim(); b.senha=$("#uSenha").value; const x=await api("POST","usuarios",b);
         await renderUsuarios(); formUsuario(null); $("#uF").hidden=true;
@@ -1270,6 +1278,408 @@ function pdfRel(){
       styles:{fontSize:9},headStyles:{fillColor:[22,122,60]},columnStyles:{1:{halign:"right"},2:{halign:"right"}},tableWidth:140});
   }
   doc.save("oportunidades_"+(f.de||"")+"_"+(f.ate||"")+".pdf");
+}
+
+/* ===================== SOLICITAÇÕES DE ORÇAMENTO / PROJETO ===================== */
+const SOL_LABEL={rascunho:"Rascunho",enviada:"Nova",em_andamento:"Em andamento",aguardando:"Aguardando informações",respondida:"Respondida",ganha:"Fechada (ganha)",perdida:"Perdida",cancelada:"Cancelada"};
+const SOL_PILL={rascunho:"rascunho",enviada:"pendente",em_andamento:"pendente",aguardando:"devolvida",respondida:"concluida",ganha:"concluida",perdida:"cancelada",cancelada:"cancelada"};
+const UNIDADES=["pç","un","m","cj","kg","cx","rolo","kit"];
+let sols=[], solCx="minhas", sCur=null, sMeta=null, sAnexos=[], sDirty=false, sTimer=null, sChain=Promise.resolve();
+const ehInterno=()=>can("orcamentos");
+const ehSolic=m=>!!m&&(m.solicitanteId===ME.id||(ME.papel==="integrador"&&ME.empresa&&m.empresa&&ME.empresa.toLowerCase()===m.empresa.toLowerCase()));
+
+function blankSol(){
+  return {id:uid(),criado:Date.now(),tipo:"orcamento",fabricanteId:null,
+    cliente:{nome:"",cnpj:"",unidade:"",cidade:"",uf:"",contatoNome:"",contatoTel:"",contatoEmail:""},
+    itens:[{modo:"codigo",codigo:"",ref:"",descricao:"",qtd:1,un:"pç",obs:""}],
+    dataNecessidade:"",urgencia:"normal",previsao:"",descricao:""};
+}
+function normSol(d){const b=blankSol();for(const k of Object.keys(b)){if(d[k]==null)d[k]=b[k];else if(b[k]&&typeof b[k]==="object"&&!Array.isArray(b[k]))d[k]=Object.assign({},b[k],d[k]);}if(!Array.isArray(d.itens))d.itens=[];return d;}
+function solEditavel(){
+  if(!sCur||!sMeta) return false;
+  if(ehSolic(sMeta)&&["rascunho","aguardando"].includes(sMeta.status)) return true;
+  return ehInterno()&&["enviada","em_andamento","aguardando"].includes(sMeta.status);
+}
+function faltasSol(d){
+  const F=[];
+  if(!d.cliente.nome.trim()) F.push("Cliente");
+  if(!d.cliente.unidade.trim()) F.push("Unidade");
+  if(!d.dataNecessidade) F.push("Data da necessidade da cotação");
+  if(!d.itens.some(i=>(i.codigo||"").trim()||(i.descricao||"").trim())&&!d.descricao.trim()) F.push("Pelo menos um item (ou a descrição do que precisa)");
+  return F;
+}
+
+/* ---------- caixas e lista ---------- */
+function caixasSol(){
+  const cx=[];
+  if(can("solicitar")||!ehInterno()) cx.push(["minhas","Minhas"]);
+  if(ehInterno()) cx.push(["novas","Novas"],["andamento","Em andamento"],["respondidas","Respondidas"],["todas","Todas"]);
+  return cx;
+}
+async function renderSolView(){
+  const v=$("#view-sol");
+  if(v.dataset.u!==String(ME.id)){ sols=[]; sCur=null; sMeta=null; sAnexos=[]; solCx=lsGet("solcx_"+ME.id)||"";
+    v.innerHTML=`<div class="layout"><aside class="list">
+      <div class="head"><h3>Solicitações</h3><button class="btn small pri" id="solNova">+ Nova</button></div>
+      <div class="seg" id="solCaixas"></div>
+      <input type="search" id="solBusca" placeholder="Buscar nº, cliente, unidade, empresa">
+      <div class="oplist" id="solLista"></div>
+      <div class="savebar" id="solSave"></div>
+      ${ehInterno()?'<div class="row"><button class="btn small ghost" id="solXls">Exportar lista (Excel)</button></div>':""}
+    </aside><main class="card" id="solEd"></main></div>`;
+    v.dataset.u=String(ME.id);
+    $("#solNova").onclick=novaSol;
+    $("#solBusca").oninput=listaSol;
+    $("#solLista").onclick=e=>{const b=e.target.closest(".opitem");if(b)abrirSol(b.dataset.id);};
+    $("#solCaixas").onclick=async e=>{const b=e.target.closest("[data-sx]");if(!b)return;await flushSol();solCx=b.dataset.sx;lsSet("solcx_"+ME.id,solCx);sCur=null;sMeta=null;await carregarSols(true);};
+    const x=$("#solXls"); if(x) x.onclick=exportarSols;
+  }
+  const cx=caixasSol();
+  if(!cx.some(c=>c[0]===solCx)) solCx=lsGet("solcx_"+ME.id)||(ehInterno()&&COUNTS.solNovas?"novas":cx[0][0]);
+  if(!cx.some(c=>c[0]===solCx)) solCx=cx[0][0];
+  $("#solCaixas").innerHTML=cx.map(([k,l])=>`<button data-sx="${k}" aria-pressed="${k===solCx}">${l}<span class="badge" data-sbadge="${k}" hidden></span></button>`).join("");
+  $("#solCaixas").hidden=cx.length<2;
+  badgesSol();
+  await carregarSols(!sCur);
+}
+function badgesSol(){
+  const n=$('[data-sbadge="novas"]'); if(n){n.textContent=COUNTS.solNovas||0;n.hidden=!COUNTS.solNovas;}
+  const m=$('[data-sbadge="minhas"]'); if(m){m.textContent=COUNTS.solAguardando||0;m.hidden=!COUNTS.solAguardando;m.title="Aguardando suas informações";}
+}
+async function carregarSols(abrir){
+  document.querySelectorAll("#solCaixas [data-sx]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.sx===solCx?"true":"false"));
+  try{ sols=await api("GET","sol?caixa="+solCx); }catch(e){ falha(e); return; }
+  if(!ME) return;
+  listaSol();
+  if(abrir){ const alvo=sols[0]; if(alvo) await abrirSol(alvo.id); else {sCur=null;sMeta=null;edSol();} }
+}
+function listaSol(){
+  const q=norm($("#solBusca").value), el=$("#solLista");
+  const it=sols.filter(s=>!q||norm([s.numero,s.cliente,s.unidade,s.empresa,s.solicitante].join(" ")).includes(q));
+  if(!it.length){el.innerHTML=`<p class="muted" style="font-size:13px;margin:4px">${q?"Nada encontrado.":{minhas:"Nenhuma solicitação ainda. Clique em <b>+ Nova</b>.",novas:"Nenhuma solicitação nova.",andamento:"Nada em andamento.",respondidas:"Nenhuma respondida ainda.",todas:"Nenhuma solicitação."}[solCx]}</p>`;return;}
+  el.innerHTML=it.map(s=>`<button class="opitem ${sCur&&s.id===sCur.id?"on":""}" data-id="${s.id}">
+    <b>${esc(s.numero||"")} · ${esc(s.cliente||"Sem cliente")}</b><em class="pill ${SOL_PILL[s.status]}">${SOL_LABEL[s.status]}</em>
+    <span>${esc(s.unidade||"—")}${s.cidade?" · "+esc(s.cidade):""} · ${s.itens} item(ns)</span>
+    <span>${solCx!=="minhas"?esc(s.empresa||s.solicitante)+" · ":""}${s.tipo==="projeto"?"Projeto":"Orçamento"} · até ${s.dataNecessidade?new Date(s.dataNecessidade+"T12:00").toLocaleDateString("pt-BR"):"—"}</span></button>`).join("");
+}
+
+/* ---------- abrir / criar / salvar ---------- */
+async function novaSol(){
+  await flushSol();
+  sCur=blankSol(); sMeta={id:sCur.id,status:"rascunho",versao:0,solicitanteId:ME.id,solicitante:ME.nome,empresa:ME.empresa||"",novo:true};
+  sAnexos=[]; if(caixasSol().some(c=>c[0]==="minhas")&&solCx!=="minhas"){solCx="minhas";}
+  edSol(); listaSol(); setTimeout(()=>{const i=$("#s_cli_nome");if(i)i.focus();},50);
+}
+async function abrirSol(id){
+  await flushSol();
+  try{
+    const r=await api("GET","sol/"+id); if(!ME) return;
+    const {dados,anexos,...meta}=r; sCur=normSol(dados); sCur.id=r.id; sMeta=meta; sAnexos=anexos||[];
+    listaSol(); edSol();
+  }catch(e){falha(e);}
+}
+function sTouch(){ if(!sCur||!solEditavel()) return; sDirty=true; $("#solSave").textContent="Alterações pendentes…"; clearTimeout(sTimer); sTimer=setTimeout(flushSol,2000); }
+function flushSol(){
+  clearTimeout(sTimer);
+  if(!sDirty||!sCur||!sMeta) return sChain;
+  sDirty=false; const d=sCur, m=sMeta;
+  sChain=sChain.then(async()=>{
+    $("#solSave").textContent="Salvando…";
+    try{ const r=await api("PUT","sol/"+d.id,{dados:d,versao:m.versao||0}); m.versao=r.versao; m.status=r.status; m.numero=r.numero; delete m.novo;
+      $("#solSave").textContent="Salvo na planilha às "+new Date().toLocaleTimeString("pt-BR").slice(0,5)+".";
+      const i=sols.findIndex(x=>x.id===d.id), res={id:d.id,numero:r.numero,status:r.status,cliente:d.cliente.nome,unidade:d.cliente.unidade,cidade:[d.cliente.cidade,d.cliente.uf].filter(Boolean).join("/"),
+        itens:d.itens.filter(x=>x.codigo||x.descricao).length,tipo:d.tipo,dataNecessidade:d.dataNecessidade,empresa:m.empresa,solicitante:m.solicitante,solicitanteId:m.solicitanteId,atualizado:Date.now()};
+      if(i>=0) Object.assign(sols[i],res); else sols.unshift(res); listaSol();
+      const h=$("#solNum"); if(h&&r.numero) h.textContent=r.numero;
+    }catch(e){ if(d===sCur) sDirty=true; $("#solSave").textContent=(e.message||"Não salvou.");
+      if(e.status!==409&&e.status!==401&&e.status!==403){clearTimeout(sTimer);sTimer=setTimeout(flushSol,5000);} else toast(e.message); }
+  });
+  return sChain;
+}
+async function acaoSol(nome,extra){
+  await flushSol();
+  try{ const r=await api("POST","sol/"+sCur.id+"/acao",Object.assign({acao:nome},extra||{})); sMeta=Object.assign(sMeta,r); delete sMeta.novo;
+    const i=sols.findIndex(x=>x.id===r.id); if(i>=0) sols[i]=Object.assign(sols[i],r); listaSol(); contagem(); return r; }
+  catch(e){ falha(e); return null; }
+}
+
+/* ---------- editor ---------- */
+function sf(path,label,opt={}){ // campo ligado a sCur
+  const v=path.split(".").reduce((a,k)=>a==null?a:a[k],sCur)??""; const id="s_"+path.replace(/\./g,"_");
+  let ctl;
+  if(opt.type==="uf") ctl=`<select id="${id}" data-s="${path}"><option value="">—</option>${UFS.map(u=>`<option ${u===v?"selected":""}>${u}</option>`).join("")}</select>`;
+  else if(opt.type==="textarea") ctl=`<textarea id="${id}" data-s="${path}" placeholder="${esc(opt.ph||"")}" maxlength="4000">${esc(v)}</textarea>`;
+  else ctl=`<input id="${id}" type="${opt.type||"text"}" data-s="${path}" data-fmt="${opt.fmt||""}" value="${esc(v)}" placeholder="${esc(opt.ph||"")}" ${opt.list?`list="${opt.list}"`:""} autocomplete="off">`;
+  return `<div class="f ${opt.full?"full":""}"><label for="${id}">${label}${opt.req?'<span class="req">*</span>':""}</label>${ctl}${opt.hint?`<span class="hint">${opt.hint}</span>`:""}</div>`;
+}
+function edSol(){
+  const ed=$("#solEd");
+  if(!sCur){ ed.innerHTML=`<div class="empty"><h2>${ehInterno()&&solCx!=="minhas"?"Nada por aqui":"Peça um orçamento ou projeto"}</h2><p class="muted" style="max-width:54ch">Informe o cliente, a unidade, os itens (com código ou por equivalência), anexe fotos e documentos e diga até quando precisa da cotação. A equipe S2I recebe na hora.</p><button class="btn pri" onclick="novaSol()">+ Nova solicitação</button></div>`; return; }
+  const d=sCur, m=sMeta, ro=!solEditavel(), interno=ehInterno(), dono=ehSolic(m);
+  const clientesAnt=[...new Set(sols.map(s=>s.cliente).filter(Boolean))];
+  const unidadesAnt=[...new Set(sols.filter(s=>s.cliente===d.cliente.nome).map(s=>s.unidade).filter(Boolean))];
+  const resp=d.resposta;
+  ed.innerHTML=`${bannerSol()}
+  <div class="pane" id="solPane">
+   <header><span class="eyebrow">${m.novo?"Nova solicitação":`<span id="solNum">${esc(m.numero||"")}</span> · ${SOL_LABEL[m.status]}`}</span>
+     <h2>${d.tipo==="projeto"?"Solicitação de projeto":"Solicitação de orçamento"}${d.cliente.nome?" · "+esc(d.cliente.nome):""}</h2>
+     ${m.empresa||m.solicitante?`<p class="muted" style="margin:0">Pedido por <b>${esc(m.solicitante||ME.nome)}</b>${m.empresa?" · "+esc(m.empresa):""}${m.enviadoEm?" · enviado em "+fmtDH(m.enviadoEm):""}${m.responsavel?" · com "+esc(m.responsavel):""}</p>`:""}</header>
+
+   <section class="bloco"><h3>1. O que você precisa</h3>
+    <div class="choice">
+      <label><input type="radio" name="stipo" data-s="tipo" value="orcamento" ${d.tipo!=="projeto"?"checked":""}><span><b>Orçamento</b><small>Cotação de itens: com código ou por equivalência.</small></span></label>
+      <label><input type="radio" name="stipo" data-s="tipo" value="projeto" ${d.tipo==="projeto"?"checked":""}><span><b>Projeto</b><small>Painel, automação ou sistema: descreva a necessidade e anexe desenhos.</small></span></label>
+    </div>
+    <div class="grid"><div class="f"><label for="s_fab">Fabricante / marca preferida</label><select id="s_fab" data-s="fabricanteId"><option value="">Indiferente</option>${fabOptions(d.fabricanteId)}</select></div></div>
+   </section>
+
+   <section class="bloco"><h3>2. Cliente e unidade</h3><div class="grid">
+    ${sf("cliente.nome","Cliente",{req:1,list:"dlSCli",ph:"Razão social ou nome do cliente"})}
+    ${sf("cliente.unidade","Unidade",{req:1,list:"dlSUni",ph:"Ex.: Planta Anápolis · Linha 2 · Filial Centro"})}
+    ${sf("cliente.cidade","Cidade")}${sf("cliente.uf","Estado",{type:"uf"})}
+    ${sf("cliente.cnpj","CNPJ",{fmt:"cnpj",ph:"Se souber"})}
+    ${sf("cliente.contatoNome","Contato no cliente")}${sf("cliente.contatoTel","Telefone do contato",{fmt:"tel"})}${sf("cliente.contatoEmail","E-mail do contato",{type:"email"})}
+    <datalist id="dlSCli">${clientesAnt.map(c=>`<option value="${esc(c)}">`).join("")}</datalist><datalist id="dlSUni">${unidadesAnt.map(c=>`<option value="${esc(c)}">`).join("")}</datalist>
+   </div></section>
+
+   <section class="bloco"><h3>3. Itens</h3>
+    <p class="muted" style="margin:0;font-size:13px">Para cada item escolha <b>Tenho o código</b> (informe o código do fabricante) ou <b>Equivalência</b> (informe a marca e o modelo que o cliente usa hoje, e nós indicamos o equivalente).</p>
+    <div class="tablewrap"><table class="itsol"><thead><tr><th>#</th><th>Tipo</th><th>Código / marca e modelo atual</th><th>Descrição</th><th class="num">Qtd</th><th>Un.</th><th>Observação</th><th></th></tr></thead><tbody id="sItens">
+    ${d.itens.map((i,k)=>`<tr data-k="${k}"><td>${k+1}</td>
+      <td><select data-i="modo"><option value="codigo" ${i.modo!=="equivalencia"?"selected":""}>Tenho o código</option><option value="equivalencia" ${i.modo==="equivalencia"?"selected":""}>Equivalência</option></select></td>
+      <td>${i.modo==="equivalencia"?`<input type="text" data-i="ref" value="${esc(i.ref)}" placeholder="Ex.: Siemens 3RT2026-1AN20">`:`<input type="text" class="mono" data-i="codigo" value="${esc(i.codigo)}" placeholder="Ex.: LC1D18M7">${i.achado?'<div class="conf alta" style="margin-top:3px;display:inline-block">no catálogo</div>':""}`}</td>
+      <td><input type="text" data-i="descricao" value="${esc(i.descricao)}" placeholder="${i.modo==="equivalencia"?"O que é / características":"Opcional"}"></td>
+      <td class="num"><input type="number" min="0" step="1" data-i="qtd" value="${i.qtd??""}" style="width:76px"></td>
+      <td><select data-i="un">${UNIDADES.map(u=>`<option ${u===i.un?"selected":""}>${u}</option>`).join("")}</select></td>
+      <td><input type="text" data-i="obs" value="${esc(i.obs)}"></td>
+      <td><button class="btn small ghost" data-i="del" aria-label="Remover item ${k+1}">×</button></td></tr>`).join("")||'<tr><td colspan="8" class="muted">Nenhum item.</td></tr>'}
+    </tbody></table></div>
+    <div class="row"><button class="btn small" id="sAddIt">+ Item</button><button class="btn small ghost" id="sColar">Colar lista do Excel</button>
+      <span class="muted" style="font-size:12px">${d.itens.filter(i=>i.codigo||i.descricao||i.ref).length} item(ns)</span></div>
+    <div id="sColarBox" hidden><div class="f"><label for="sColarTxt">Uma linha por item: código (ou marca/modelo) e quantidade</label>
+      <textarea id="sColarTxt" class="mono" style="min-height:90px" placeholder="LC1D18M7 10&#10;GV2ME10 5&#10;ATV320U22N4B 2"></textarea></div>
+      <div class="row"><button class="btn small pri" id="sColarOk">Adicionar à lista</button><label class="check"><input type="checkbox" id="sColarEq"> São de outra marca (equivalência)</label></div></div>
+   </section>
+
+   <section class="bloco" data-keep><h3>4. Anexos <span class="muted" style="font-size:13px;font-weight:400">fotos, desenhos, listas, especificações (até 15 MB cada)</span></h3>
+    <div class="anexos" id="sAnxPed">${listaAnexos("pedido")}</div>
+    ${solEditavel()?`<div class="row"><label class="btn small" for="sFile">Anexar arquivos</label><input type="file" id="sFile" multiple hidden accept="image/*,.pdf,.dwg,.dxf,.xls,.xlsx,.csv,.doc,.docx,.txt,.zip,.rar,.7z">
+      <span class="muted" id="sUp" style="font-size:12px">Fotos grandes são reduzidas automaticamente.</span></div>`:""}
+   </section>
+
+   <section class="bloco"><h3>5. Prazo e detalhes</h3><div class="grid">
+    ${sf("dataNecessidade","Data da necessidade da cotação",{req:1,type:"date",hint:"Até quando você precisa receber a cotação."})}
+    <div class="f"><label for="s_urg">Urgência</label><select id="s_urg" data-s="urgencia"><option value="normal" ${d.urgencia!=="urgente"?"selected":""}>Normal</option><option value="urgente" ${d.urgencia==="urgente"?"selected":""}>Urgente</option></select></div>
+    ${sf("previsao","Previsão de compra / execução",{ph:"Ex.: março/2027, parada de fábrica em dezembro"})}
+    ${sf("descricao","Descrição / observações",{type:"textarea",full:1,ph:d.tipo==="projeto"?"Descreva o projeto: aplicação, tensão, cargas, ambiente, normas, o que já existe…":"Detalhes que ajudem a cotar: aplicação, condições, alternativas aceitas…"})}
+   </div></section>
+
+   ${resp||interno?blocoResposta():""}
+   <div id="sFluxo"></div>
+   <div class="card fluxo" data-keep><h3>Histórico e conversa</h3><div id="sHist" class="hist"><span class="muted">${m.novo?"Ainda não salva.":"Carregando…"}</span></div>
+     ${m.novo?"":`<div class="row"><input type="text" id="sCmt" placeholder="Escrever uma mensagem para ${dono&&!interno?"a equipe S2I":"o integrador"}" style="flex:1;min-width:200px"><button class="btn small" id="sCmtB">Enviar mensagem</button></div>`}</div>
+  </div>`;
+  ligarSol();
+  fluxoSol();
+  if(ro){ $("#solPane").querySelectorAll(":scope > section:not([data-keep]) :is(input,select,textarea,button)").forEach(el=>el.disabled=true); $("#solPane").classList.add("ro"); }
+  histSol();
+}
+function bannerSol(){
+  const m=sMeta; if(!m||m.novo) return "";
+  if(m.status==="aguardando") return `<div class="note bad banner"><b>${ehSolic(m)?"A equipe S2I precisa de mais informações.":"Aguardando o integrador."}</b> <span id="sPedido"></span>${ehSolic(m)?" Complete abaixo e clique em <b>Enviar informações</b>.":""}</div>`;
+  if(m.status==="respondida") return `<div class="note banner"><b>Respondida</b> em ${fmtDH(m.respondidoEm)}${m.responsavel?" por "+esc(m.responsavel):""}. Veja a resposta abaixo.</div>`;
+  if(m.status==="enviada") return `<div class="note warn banner"><b>Nova.</b> ${ehSolic(m)?"A equipe S2I recebeu e vai analisar.":"Ainda ninguém assumiu."}</div>`;
+  if(m.status==="em_andamento") return `<div class="note warn banner"><b>Em andamento</b>${m.responsavel?" com "+esc(m.responsavel):""}.</div>`;
+  if(m.status==="ganha") return `<div class="note banner"><b>Fechada (ganha).</b></div>`;
+  if(m.status==="perdida"||m.status==="cancelada") return `<div class="note banner">${SOL_LABEL[m.status]}.</div>`;
+  return "";
+}
+function tamanho(n){return n>1048576?(n/1048576).toFixed(1).replace(".",",")+" MB":Math.max(1,Math.round(n/1024))+" KB";}
+function iconeArq(t,n){ if(/^image\//.test(t)) return "🖼"; if(/pdf/.test(t)||/\.pdf$/i.test(n)) return "PDF"; if(/sheet|excel|csv/.test(t)||/\.(xlsx?|csv)$/i.test(n)) return "XLS"; if(/\.(dwg|dxf)$/i.test(n)) return "DWG"; if(/word/.test(t)||/\.docx?$/i.test(n)) return "DOC"; return "ARQ"; }
+function listaAnexos(grupo){
+  const L=sAnexos.filter(a=>a.grupo===grupo);
+  if(!L.length) return `<p class="muted" style="margin:0;font-size:13px">${grupo==="resposta"?"Nenhum arquivo na resposta.":"Nenhum anexo."}</p>`;
+  const podeRem=a=>grupo==="resposta"?ehInterno()&&sMeta.status!=="ganha":solEditavel()&&(a.usuarioId===ME.id||ehInterno());
+  return L.map(a=>`<div class="anx" data-a="${a.id}"><span class="ico">${iconeArq(a.tipo,a.nome)}</span><span class="nm"><b>${esc(a.nome)}</b><small>${tamanho(a.tamanho)} · ${esc(a.usuario)} · ${fmtDH(a.quando)}</small></span>
+    <span class="row" style="flex-wrap:nowrap">${/^image\//.test(a.tipo)?`<button class="btn small ghost" data-av="${a.id}">Ver</button>`:""}<button class="btn small ghost" data-ab="${a.id}">Baixar</button>${podeRem(a)?`<button class="btn small ghost danger" data-ar="${a.id}">Remover</button>`:""}</span></div>`).join("");
+}
+function blocoResposta(){
+  const r=sCur.resposta||{}, interno=ehInterno(), podeResp=interno&&["enviada","em_andamento","aguardando","respondida"].includes(sMeta.status)&&!sMeta.novo;
+  if(!interno) return `<section class="bloco resposta" data-keep><h3>Resposta da S2I</h3>
+    <div class="resp">${esc(r.texto||"").replace(/\n/g,"<br>")}</div>
+    <dl class="kv">${r.valor?`<dt>Valor</dt><dd><b>${BRL(r.valor)}</b></dd>`:""}${r.validade?`<dt>Validade</dt><dd>${new Date(r.validade+"T12:00").toLocaleDateString("pt-BR")}</dd>`:""}${r.prazo?`<dt>Prazo de entrega</dt><dd>${esc(r.prazo)}</dd>`:""}<dt>Respondido por</dt><dd>${esc(r.por||"")} · ${fmtDH(r.em)}</dd></dl>
+    <div class="anexos" id="sAnxResp">${listaAnexos("resposta")}</div></section>`;
+  return `<section class="bloco resposta" data-keep><h3>Resposta ao integrador</h3>
+    ${podeResp?`<div class="grid">
+      <div class="f full"><label for="rTxt">Resposta<span class="req">*</span></label><textarea id="rTxt" style="min-height:90px" placeholder="Ex.: Segue cotação em anexo. Itens 3 e 4 com equivalente Schneider LC1D25M7…">${esc(r.texto||"")}</textarea></div>
+      <div class="f"><label for="rVal">Valor total (R$)</label><input type="number" id="rVal" min="0" step="0.01" value="${r.valor||""}"></div>
+      <div class="f"><label for="rValid">Validade da proposta</label><input type="date" id="rValid" value="${esc(r.validade||"")}"></div>
+      <div class="f"><label for="rPrazo">Prazo de entrega</label><input type="text" id="rPrazo" value="${esc(r.prazo||"")}" placeholder="Ex.: 15 dias úteis"></div></div>
+      <div class="anexos" id="sAnxResp">${listaAnexos("resposta")}</div>
+      <div class="row"><label class="btn small" for="rFile">Anexar orçamento / arquivos</label><input type="file" id="rFile" multiple hidden>
+        <button class="btn pri" id="rEnviar">${sMeta.status==="respondida"?"Atualizar resposta":"Enviar resposta"}</button><span class="muted" id="rUp" style="font-size:12px"></span></div>`
+      :(r.texto?`<div class="resp">${esc(r.texto).replace(/\n/g,"<br>")}</div><dl class="kv">${r.valor?`<dt>Valor</dt><dd><b>${BRL(r.valor)}</b></dd>`:""}${r.validade?`<dt>Validade</dt><dd>${new Date(r.validade+"T12:00").toLocaleDateString("pt-BR")}</dd>`:""}${r.prazo?`<dt>Prazo</dt><dd>${esc(r.prazo)}</dd>`:""}</dl><div class="anexos" id="sAnxResp">${listaAnexos("resposta")}</div>`
+        :'<p class="muted" style="margin:0">Ainda sem resposta.</p>')}
+  </section>`;
+}
+function fluxoSol(){
+  const box=$("#sFluxo"), m=sMeta, st=m.status, dono=ehSolic(m), interno=ehInterno(), F=faltasSol(sCur);
+  let h="";
+  if(dono&&(st==="rascunho"||st==="aguardando")){
+    h+=`<div class="card fluxo" data-keep><h3>${st==="aguardando"?"Enviar informações":"Enviar solicitação"}</h3>
+      ${F.length?`<div class="note bad"><b>Para enviar, preencha:</b> ${F.map(esc).join(", ")}.</div>`:`<p class="muted" style="margin:0;font-size:13px">Tudo certo. A equipe S2I recebe um aviso por e-mail assim que você enviar.</p>`}
+      <div class="f"><label for="sRec">Recado (opcional)</label><input type="text" id="sRec" placeholder="Ex.: cliente pediu prioridade para os itens 1 e 2"></div>
+      <div class="row"><button class="btn pri" id="sEnviar" ${F.length?"disabled":""}>${st==="aguardando"?"Enviar informações":"Enviar solicitação"}</button>
+      ${st==="rascunho"?'<button class="btn ghost danger" id="sExcluir">Excluir rascunho</button>':'<button class="btn ghost danger" id="sCancelar">Cancelar solicitação</button>'}</div></div>`;
+  } else if(dono&&!interno&&st==="enviada"){
+    h+=`<div class="card fluxo" data-keep><h3>Enviada</h3><p class="muted" style="margin:0">Você recebe um e-mail quando a equipe responder. Use o histórico abaixo para conversar.</p><div class="row"><button class="btn small ghost danger" id="sCancelar">Cancelar solicitação</button></div></div>`;
+  }
+  if(interno&&!m.novo&&st!=="rascunho"){
+    const abertas=["enviada","em_andamento","aguardando"].includes(st);
+    h+=`<div class="card fluxo" data-keep><h3>Atendimento</h3><div class="row">
+      ${abertas&&m.responsavelId!==ME.id?'<button class="btn small" id="sAssumir">Assumir</button>':""}
+      ${["enviada","em_andamento","aguardando","respondida","ganha"].includes(st)?`<button class="btn small" id="sCriarOp">${m.oportunidadeId?"Abrir oportunidade criada":"Criar oportunidade com estes dados"}</button>`:""}
+      ${st==="respondida"?'<button class="btn small" id="sGanha">Fechada (ganha)</button><button class="btn small ghost" id="sPerdida">Perdida</button>':""}
+      ${["respondida","ganha","perdida","cancelada"].includes(st)?'<button class="btn small ghost" id="sReabrir">Reabrir</button>':""}
+      ${abertas?'<button class="btn small ghost danger" id="sCancelar">Cancelar</button>':""}</div>
+      ${["enviada","em_andamento"].includes(st)?`<details><summary>Pedir mais informações ao integrador</summary><div class="f" style="margin-top:8px"><textarea id="sInfoTxt" style="min-height:60px" placeholder="Ex.: mande foto da placa do motor e a tensão de comando."></textarea></div><div class="row" style="margin-top:6px"><button class="btn danger" id="sInfo">Pedir informações</button></div></details>`:""}</div>`;
+  }
+  box.innerHTML=h;
+  const on=(id,fn)=>{const b=$("#"+id);if(b)b.onclick=fn;};
+  on("sEnviar",async()=>{const r=await acaoSol("enviar",{texto:$("#sRec").value});if(r){toast(sMeta.status==="enviada"?"Solicitação enviada. A equipe foi avisada.":"Informações enviadas");edSol();}});
+  on("sExcluir",async()=>{const b=$("#sExcluir");if(!b.dataset.ok){b.dataset.ok=1;b.textContent="Clique de novo para excluir";return;}
+    try{sDirty=false;await api("DELETE","sol/"+sCur.id);sols=sols.filter(x=>x.id!==sCur.id);sCur=null;sMeta=null;listaSol();edSol();toast("Rascunho excluído");}catch(e){falha(e);}});
+  on("sCancelar",async()=>{const b=$("#sCancelar");if(!b.dataset.ok){b.dataset.ok=1;b.textContent="Confirmar cancelamento";return;}const r=await acaoSol("cancelar");if(r){toast("Solicitação cancelada");edSol();}});
+  on("sAssumir",async()=>{const r=await acaoSol("assumir");if(r){toast("Você assumiu esta solicitação");edSol();}});
+  on("sGanha",async()=>{const r=await acaoSol("ganha");if(r){toast("Marcada como fechada (ganha)");edSol();}});
+  on("sPerdida",async()=>{const r=await acaoSol("perdida");if(r){toast("Marcada como perdida");edSol();}});
+  on("sReabrir",async()=>{const r=await acaoSol("reabrir");if(r){toast("Reaberta");edSol();}});
+  on("sInfo",async()=>{const t=$("#sInfoTxt").value.trim();if(!t){toast("Escreva o que precisa");return;}const r=await acaoSol("pedir_info",{texto:t});if(r){toast("Pedido enviado ao integrador");edSol();}});
+  on("sCriarOp",criarOpDaSol);
+}
+function ligarSol(){
+  const p=$("#solPane");
+  p.querySelectorAll("[data-s]").forEach(el=>{
+    const ev=el.tagName==="SELECT"||el.type==="radio"?"change":"input";
+    el.addEventListener(ev,()=>{
+      if(el.type==="radio"&&!el.checked) return;
+      let v=el.value; const fm=el.dataset.fmt;
+      if(fm==="cnpj"){v=fmtCNPJ(v);el.value=v} if(fm==="tel"){v=fmtTel(v);el.value=v}
+      if(el.dataset.s==="fabricanteId") v=+v||null;
+      const ks=el.dataset.s.split("."); let o=sCur; ks.slice(0,-1).forEach(k=>o=o[k]); o[ks.at(-1)]=v;
+      sTouch();
+      if(el.dataset.s==="tipo"||el.dataset.s==="fabricanteId") edSol();
+      else if(["cliente.nome","cliente.unidade","dataNecessidade","descricao"].includes(el.dataset.s)) fluxoSolLeve();
+    });
+  });
+  const tb=$("#sItens");
+  tb.addEventListener("change",async e=>{const tr=e.target.closest("tr[data-k]");if(!tr)return;const it=sCur.itens[+tr.dataset.k],k=e.target.dataset.i;if(!k)return;
+    if(k==="qtd") it.qtd=+e.target.value||0; else it[k]=e.target.value;
+    if(k==="codigo"){ it.codigo=it.codigo.trim().toUpperCase(); e.target.value=it.codigo; it.achado=false;
+      if(it.codigo&&sCur.fabricanteId){ try{const c=await getCat(sCur.fabricanteId);const i=c.idx.get(it.codigo);if(i!=null){it.achado=true;if(!it.descricao)it.descricao=c.rows[i][1];}}catch(err){} } }
+    sTouch(); if(k==="modo"||k==="codigo") edSol(); else fluxoSolLeve();});
+  tb.addEventListener("input",e=>{const tr=e.target.closest("tr[data-k]");if(!tr)return;const it=sCur.itens[+tr.dataset.k],k=e.target.dataset.i;if(["descricao","obs","ref"].includes(k)){it[k]=e.target.value;sTouch();}});
+  tb.addEventListener("click",e=>{if(e.target.dataset.i!=="del")return;sCur.itens.splice(+e.target.closest("tr").dataset.k,1);sTouch();edSol();});
+  const add=$("#sAddIt"); if(add) add.onclick=()=>{const ult=sCur.itens[sCur.itens.length-1];sCur.itens.push({modo:ult?ult.modo:"codigo",codigo:"",ref:"",descricao:"",qtd:1,un:"pç",obs:""});sTouch();edSol();
+    const l=$("#sItens tr:last-child input[type=text]");if(l)l.focus();};
+  const col=$("#sColar"); if(col) col.onclick=()=>{$("#sColarBox").hidden=!$("#sColarBox").hidden;$("#sColarTxt").focus();};
+  const cok=$("#sColarOk"); if(cok) cok.onclick=async()=>{
+    const eq=$("#sColarEq").checked, linhas=$("#sColarTxt").value.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+    if(!linhas.length){toast("Cole ao menos uma linha");return;}
+    const cat=sCur.fabricanteId?await getCat(sCur.fabricanteId).catch(()=>null):null;
+    sCur.itens=sCur.itens.filter(i=>i.codigo||i.descricao||i.ref);
+    linhas.forEach(l=>{
+      let qtd=1, txt=l; const mq=l.match(/^(.*?)[\t; ]+(\d+(?:[.,]\d+)?)\s*(\w{1,4})?\s*$/); if(mq){txt=mq[1].trim();qtd=parseFloat(mq[2].replace(",","."))||1;}
+      if(eq) sCur.itens.push({modo:"equivalencia",codigo:"",ref:txt,descricao:"",qtd,un:"pç",obs:""});
+      else{ const cod=txt.split(/\s+/)[0].toUpperCase(), resto=txt.slice(cod.length).trim(); let desc=resto, achado=false;
+        if(cat){const i=cat.idx.get(cod);if(i!=null){achado=true;if(!desc)desc=cat.rows[i][1];}}
+        sCur.itens.push({modo:"codigo",codigo:cod,ref:"",descricao:desc,qtd,un:"pç",obs:"",achado}); }});
+    sTouch(); edSol(); toast(linhas.length+" item(ns) adicionados");};
+  const f=$("#sFile"); if(f) f.onchange=e=>{enviarArquivos([...e.target.files],"pedido",$("#sUp"));e.target.value="";};
+  const rf=$("#rFile"); if(rf) rf.onchange=e=>{enviarArquivos([...e.target.files],"resposta",$("#rUp"));e.target.value="";};
+  const re=$("#rEnviar"); if(re) re.onclick=async()=>{const t=$("#rTxt").value.trim();if(!t){toast("Escreva a resposta");$("#rTxt").focus();return;}
+    const r=await acaoSol("responder",{resposta:{texto:t,valor:+$("#rVal").value||null,validade:$("#rValid").value,prazo:$("#rPrazo").value}});
+    if(r){ sCur.resposta={texto:t,valor:+$("#rVal").value||null,validade:$("#rValid").value,prazo:$("#rPrazo").value,por:ME.nome,em:Date.now()}; toast("Resposta enviada. O integrador foi avisado por e-mail."); edSol(); }};
+  p.addEventListener("click",async e=>{
+    const b=e.target.closest("[data-ab],[data-av],[data-ar]"); if(!b) return;
+    const id=b.dataset.ab||b.dataset.av||b.dataset.ar, a=sAnexos.find(x=>x.id===id); if(!a) return;
+    if(b.dataset.ar){ if(!b.dataset.ok){b.dataset.ok=1;b.textContent="Confirmar";return;}
+      try{await api("DELETE","anexo/"+id);sAnexos=sAnexos.filter(x=>x.id!==id);edSol();toast("Anexo removido");}catch(err){falha(err);} return; }
+    b.disabled=true; const t0=b.textContent; b.textContent="Baixando…";
+    try{ const r=await api("GET","anexo/"+id); const bytes=Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0)); const blob=new Blob([bytes],{type:r.tipo});
+      if(b.dataset.av){ const url=URL.createObjectURL(blob); const md=$("#modal"); md.innerHTML=`<div class="card dlg prev"><div class="row" style="justify-content:space-between"><b>${esc(a.nome)}</b><button class="btn small ghost" id="pvX">Fechar</button></div><img src="${url}" alt="${esc(a.nome)}"></div>`; md.hidden=false;
+        $("#pvX").onclick=()=>{md.hidden=true;md.innerHTML="";URL.revokeObjectURL(url);}; md.onclick=ev=>{if(ev.target===md)$("#pvX").click();}; }
+      else baixar(blob,a.nome);
+    }catch(err){falha(err);} b.disabled=false; b.textContent=t0;
+  });
+  const cb=$("#sCmtB"); if(cb) cb.onclick=async()=>{const t=$("#sCmt").value.trim();if(!t)return;try{await api("POST","sol/"+sCur.id+"/acao",{acao:"comentar",texto:t});$("#sCmt").value="";histSol();}catch(e){falha(e);}};
+}
+function fluxoSolLeve(){ clearTimeout(fluxoSolLeve.t); fluxoSolLeve.t=setTimeout(()=>{ const ativo=document.activeElement&&document.activeElement.id; fluxoSol(); if(ativo&&$("#"+ativo)) $("#"+ativo).focus(); },400); }
+async function histSol(){
+  const h=$("#sHist"); if(!h||!sCur||sMeta.novo) return;
+  try{ const l=await api("GET","sol/"+sCur.id+"/historico");
+    h.innerHTML=l.map(x=>`<div><span class="muted mono">${fmtDH(x.quando)}</span> <b>${esc(x.usuario)}</b> · ${esc(x.acao)}${x.texto?`<div class="htxt">${esc(x.texto)}</div>`:""}</div>`).join("")||'<span class="muted">Sem registros.</span>';
+    const ped=l.find(x=>x.acao==="pediu mais informações"), sp=$("#sPedido"); if(sp&&ped) sp.textContent="“"+ped.texto+"”";
+  }catch(e){ h.innerHTML='<span class="muted">Não foi possível carregar.</span>'; }
+}
+
+/* ---------- anexos: envio ---------- */
+async function reduzirImagem(file){
+  if(!/^image\/(jpeg|png|webp)$/.test(file.type)||file.size<1.5e6) return file;
+  try{ const bmp=await createImageBitmap(file); const k=Math.min(1,2000/Math.max(bmp.width,bmp.height));
+    const c=document.createElement("canvas"); c.width=Math.round(bmp.width*k); c.height=Math.round(bmp.height*k); c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+    const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",0.85)); return blob&&blob.size<file.size?new File([blob],file.name.replace(/\.\w+$/,"")+".jpg",{type:"image/jpeg"}):file;
+  }catch(e){ return file; }
+}
+function paraBase64(file){return new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]||"");r.onerror=()=>no(r.error);r.readAsDataURL(file);});}
+async function enviarArquivos(files,grupo,st){
+  if(!files.length) return;
+  if(sMeta.novo||sDirty){ sDirty=true; await flushSol(); if(sMeta.novo){toast("Não consegui salvar a solicitação antes de anexar.");return;} }
+  let n=0;
+  for(const f0 of files){
+    st.textContent=`Enviando ${n+1} de ${files.length}: ${f0.name}…`;
+    try{ const f=await reduzirImagem(f0);
+      if(f.size>15*1024*1024){toast(f0.name+": maior que 15 MB, não foi enviado");continue;}
+      const a=await api("POST","anexo",{solId:sCur.id,grupo,nome:f.name,tipo:f.type||"application/octet-stream",base64:await paraBase64(f)});
+      sAnexos.push(a); n++;
+    }catch(e){ falha(e); }
+  }
+  st.textContent=n?`${n} arquivo(s) anexado(s).`:"";
+  const box=$(grupo==="resposta"?"#sAnxResp":"#sAnxPed"); if(box) box.innerHTML=listaAnexos(grupo);
+}
+
+/* ---------- criar oportunidade a partir da solicitação ---------- */
+async function criarOpDaSol(){
+  if(sMeta.oportunidadeId){ irView("ops"); caixa="todas"; await loadList(false); await openOp(sMeta.oportunidadeId); return; }
+  await flushSol(); await flush();
+  const s=sCur, c=s.cliente, o=blankOp(), [nome,...sob]=String(c.contatoNome||"").trim().split(/\s+/);
+  o.fabricanteId=s.fabricanteId||fabPadrao();
+  o.conta=Object.assign(o.conta,{nome:c.nome,cnpj:c.cnpj,cidade:c.cidade,uf:c.uf||o.conta.uf});
+  o.contato=Object.assign(o.contato,{nome:nome||"",sobrenome:sob.join(" "),telefone:c.contatoTel,email:c.contatoEmail});
+  o.oportunidade.nomeProjeto=[c.nome,c.unidade].filter(Boolean).join(" – ").toUpperCase().slice(0,100);
+  if(sMeta.empresa){ o.temParceiro=true; o.cenario="integrador"; o.parceiro.nome=sMeta.empresa; }
+  const eq=s.itens.filter(i=>i.modo==="equivalencia"&&(i.ref||i.descricao));
+  o.oportunidade.descricao=["Origem: solicitação "+sMeta.numero+(sMeta.empresa?" de "+sMeta.empresa:"")+".",c.unidade?"Unidade: "+c.unidade+".":"",s.descricao,
+    eq.length?"Equivalências: "+eq.map(i=>i.qtd+"x "+(i.ref||i.descricao)).join("; ")+".":""].filter(Boolean).join(" ").slice(0,4000);
+  o.oportunidade.escopo=s.tipo==="projeto"?"Projeto":"";
+  cur=o; curMeta={id:o.id,status:"rascunho",versao:0,donoId:ME.id,dono:ME.nome,novo:true};
+  const cods=s.itens.filter(i=>i.modo!=="equivalencia"&&i.codigo);
+  if(cods.length){ try{ await addItems(cods.map(i=>({code:i.codigo,qtd:+i.qtd||1,preco:0}))); }catch(e){} }
+  dirty=true; await flush();
+  await acaoSol("vincular_op",{opId:o.id}); sMeta.oportunidadeId=o.id;
+  caixa="minhas"; lsSet("caixa_"+ME.id,caixa); irView("ops"); await loadList(false); step=4; renderEditor();
+  toast("Oportunidade criada a partir de "+sMeta.numero+". Complete o projeto e os preços.");
+}
+
+/* ---------- exportar lista ---------- */
+async function exportarSols(){
+  let L; try{ L=await api("GET","sol?caixa="+solCx+"&full=1"); }catch(e){ falha(e); return; }
+  const dt=s=>s?new Date(s):"", dd=iso=>iso?new Date(iso+"T12:00"):"";
+  const rows=L.map(s=>{const d=s.dados||{},c=d.cliente||{},r=d.resposta||{};return {"Nº":s.numero,"Situação":SOL_LABEL[s.status],"Tipo":s.tipo==="projeto"?"Projeto":"Orçamento","Empresa":s.empresa,"Solicitante":s.solicitante,
+    "Cliente":s.cliente,"Unidade":s.unidade,"Cidade":s.cidade,"Fabricante":s.fabricanteId?fabNome(s.fabricanteId):"Indiferente","Itens":s.itens,"Necessidade":dd(s.dataNecessidade),"Urgência":d.urgencia==="urgente"?"Urgente":"Normal",
+    "Enviada em":dt(s.enviadoEm),"Responsável":s.responsavel,"Respondida em":dt(s.respondidoEm),"Valor (R$)":r.valor||"","Validade":dd(r.validade),"Oportunidade":s.oportunidadeId?"sim":"","Descrição":d.descricao||""};});
+  const its=[]; L.forEach(s=>((s.dados||{}).itens||[]).forEach(i=>{if(i.codigo||i.ref||i.descricao)its.push({"Nº":s.numero,"Cliente":s.cliente,"Unidade":s.unidade,"Tipo":i.modo==="equivalencia"?"Equivalência":"Código","Código":i.codigo||"","Marca/modelo atual":i.ref||"","Descrição":i.descricao||"","Qtd":+i.qtd||0,"Un.":i.un||"","Observação":i.obs||""});}));
+  xlsxBaixar([["Solicitações",rows.length?rows:[["Nenhuma"]]],["Itens",its.length?its:[["Nenhum"]]]],"solicitacoes_"+solCx+"_"+new Date().toISOString().slice(0,10)+".xlsx");
 }
 
 /* ===================== POP ===================== */

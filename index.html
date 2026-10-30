@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Registro de Oportunidades S2I</title>
 <meta name="s2i-oportunidades" content="1">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1A1A1A">
+<link rel="icon" type="image/png" sizes="32x32" href="icones/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icones/icone-192.png">
+<link rel="apple-touch-icon" href="icones/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="S2I Oportunidades">
 <style>
 
 /* Layout: barra superior com abas; à esquerda a lista de oportunidades salvas, à direita o questionário em etapas. Ferramenta de trabalho, densa e legível. */
@@ -198,13 +206,30 @@ input[type=password]{font:15px var(--f-body)}
 .me{border:0;padding:0}
 a{color:var(--accent)}
 .opitem em.pill{font-style:normal}
+/* ---------- solicitações ---------- */
+.bloco{display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line);padding-top:16px}
+.itsol td{vertical-align:middle}
+.itsol input[type=text]{min-width:130px}
+.itsol select{min-width:120px}
+.anexos{display:flex;flex-direction:column;gap:6px}
+.anx{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:6px}
+.anx .ico{display:grid;place-items:center;width:40px;height:40px;border-radius:6px;background:var(--code);font:700 11px var(--f-mono);color:var(--muted)}
+.anx .nm{min-width:0}.anx .nm b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.anx .nm small{color:var(--muted);font-size:12px}
+@media (max-width:620px){.anx{grid-template-columns:40px minmax(0,1fr)}.anx>.row{grid-column:1/-1}}
+.resposta{background:var(--accent-soft);border-radius:var(--r);padding:16px;border-top:0}
+.resp{white-space:normal;line-height:1.55}
+.prev{max-width:min(92vw,1100px);max-height:92vh}
+.prev img{max-width:100%;max-height:78vh;object-fit:contain;border-radius:6px;background:var(--bg)}
+.lglogo{display:block;width:100%;max-width:300px;height:auto;margin:0 auto 6px}
+.top .brand img{align-self:center;width:28px;height:28px;border-radius:7px;flex:none}
 
 </style>
 </head>
 <body>
 <div id="login" class="loginwrap" hidden>
   <form class="card login" id="lgForm" autocomplete="on">
-    <div class="brand"><i></i>Registro de Oportunidades</div>
+    <img class="lglogo" src="icones/logo-s2i.png" alt="S2I Distribuição Industrial">
+    <div class="brand">Registro de Oportunidades</div>
     <p class="muted" style="margin:0">S2I · entre com o usuário e a senha que o administrador passou.</p>
     <div class="f"><label for="lgUser">Usuário</label><input id="lgUser" name="username" autocomplete="username" required></div>
     <div class="f"><label for="lgPass">Senha</label><input id="lgPass" name="password" type="password" autocomplete="current-password" required></div>
@@ -216,14 +241,15 @@ a{color:var(--accent)}
 
 <div id="app" hidden>
 <header class="top"><div class="wrap">
-  <div class="brand"><i></i>Oportunidades <small>S2I</small></div>
+  <div class="brand"><img src="icones/icone-48.png" alt="" width="28" height="28">Oportunidades <small>S2I</small></div>
   <nav class="tabs" id="tabs" role="tablist">
-    <button role="tab" data-view="ops" aria-selected="true">Oportunidades<span class="badge" id="tabBadge" hidden></span></button>
+    <button role="tab" data-view="ops" data-interno aria-selected="true">Oportunidades<span class="badge" id="tabBadge" hidden></span></button>
+    <button role="tab" data-view="sol" data-perm="solicitar|orcamentos" aria-selected="false">Solicitações<span class="badge" id="tabBadgeSol" hidden></span></button>
     <button role="tab" data-view="rel" data-perm="relatorios" aria-selected="false">Relatórios</button>
-    <button role="tab" data-view="cad" aria-selected="false">Cadastros</button>
+    <button role="tab" data-view="cad" data-interno aria-selected="false">Cadastros</button>
     <button role="tab" data-view="fab" data-perm="fabricantes" aria-selected="false">Fabricantes</button>
     <button role="tab" data-view="usr" data-perm="usuarios" aria-selected="false">Usuários</button>
-    <button role="tab" data-view="pop" aria-selected="false">POP</button>
+    <button role="tab" data-view="pop" data-interno aria-selected="false">POP</button>
     <button role="tab" data-view="bm" data-perm="lancar" aria-selected="false">Extensão <span id="extChip" class="pill rascunho">verificando</span></button>
   </nav>
   <details class="me" id="meMenu"><summary><span><b id="meNome"></b><small id="mePapel"></small></span></summary>
@@ -244,6 +270,7 @@ a{color:var(--accent)}
       <main class="card" id="editor"></main>
     </div>
   </section>
+  <section data-pane="sol" id="view-sol" hidden></section>
   <section data-pane="rel" id="view-rel" hidden></section>
   <section data-pane="cad" id="view-cad" hidden></section>
   <section data-pane="fab" id="view-fab" hidden></section>
@@ -259,5 +286,6 @@ a{color:var(--accent)}
 <script src="lib/jspdf.plugin.autotable.min.js"></script>
 <script src="config.js"></script>
 <script src="app.js"></script>
+<script>if("serviceWorker" in navigator) addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));</script>
 </body>
 </html>
