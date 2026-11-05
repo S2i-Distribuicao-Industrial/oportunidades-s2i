@@ -197,12 +197,14 @@ function irView(v, inicial){
   if(v==="usr") renderUsuarios();
   if(v==="fab") renderFabricantes();
   if(v==="rel") renderRelatorios();
+  if(v==="cfg") renderConfig();
   if(v==="sol") renderSolView();
   if(v==="ops"&&!inicial) loadList();
 }
 $("#tabs").addEventListener("click",e=>{const b=e.target.closest("button[data-view]");if(b){flush();irView(b.dataset.view);}});
 $("#btnSair").onclick=()=>{$("#meMenu").open=false;sair();};
 $("#btnSenha").onclick=()=>{$("#meMenu").open=false;trocarSenha(false);};
+$("#btnCfg").onclick=()=>{$("#meMenu").open=false;irView("cfg");};
 document.addEventListener("click",e=>{const m=$("#meMenu");if(m&&m.open&&!m.contains(e.target))m.open=false;});
 $("#caixas").addEventListener("click",async e=>{const b=e.target.closest("[data-cx]");if(!b)return;await flush();caixa=b.dataset.cx;lsSet("caixa_"+ME.id,caixa);cur=null;curMeta=null;await loadList(true);});
 
@@ -1283,7 +1285,10 @@ function pdfRel(){
 /* ===================== SOLICITAÇÕES DE ORÇAMENTO / PROJETO ===================== */
 const SOL_LABEL={rascunho:"Rascunho",enviada:"Nova",em_andamento:"Em andamento",aguardando:"Aguardando informações",respondida:"Respondida",ganha:"Fechada (ganha)",perdida:"Perdida",cancelada:"Cancelada"};
 const SOL_PILL={rascunho:"rascunho",enviada:"pendente",em_andamento:"pendente",aguardando:"devolvida",respondida:"concluida",ganha:"concluida",perdida:"cancelada",cancelada:"cancelada"};
-const UNIDADES=["pç","un","m","cj","kg","cx","rolo","kit"];
+const UNIDADES=["pc","Kit","m","cx"];
+const UN_MAP={"pc":"pc","pç":"pc","pcs":"pc","pçs":"pc","peça":"pc","peca":"pc","un":"pc","und":"pc","unid":"pc","kit":"Kit","kits":"Kit","cj":"Kit","m":"m","mt":"m","mts":"m","metro":"m","metros":"m","cx":"cx","cxs":"cx","caixa":"cx"};
+const unNorm=u=>UN_MAP[String(u||"").trim().toLowerCase()]||"pc";
+const ehEmail=m=>!!m&&m.origem==="email";
 let sols=[], solCx="minhas", sCur=null, sMeta=null, sAnexos=[], sDirty=false, sTimer=null, sChain=Promise.resolve();
 const ehInterno=()=>can("orcamentos");
 const ehSolic=m=>!!m&&(m.solicitanteId===ME.id||(ME.papel==="integrador"&&ME.empresa&&m.empresa&&ME.empresa.toLowerCase()===m.empresa.toLowerCase()));
@@ -1291,10 +1296,10 @@ const ehSolic=m=>!!m&&(m.solicitanteId===ME.id||(ME.papel==="integrador"&&ME.emp
 function blankSol(){
   return {id:uid(),criado:Date.now(),tipo:"orcamento",fabricanteId:null,
     cliente:{nome:"",cnpj:"",unidade:"",cidade:"",uf:"",contatoNome:"",contatoTel:"",contatoEmail:""},
-    itens:[{modo:"codigo",codigo:"",ref:"",descricao:"",qtd:1,un:"pç",obs:""}],
+    itens:[{modo:"codigo",codigo:"",ref:"",descricao:"",qtd:1,un:"pc",obs:""}],
     dataNecessidade:"",urgencia:"normal",previsao:"",descricao:""};
 }
-function normSol(d){const b=blankSol();for(const k of Object.keys(b)){if(d[k]==null)d[k]=b[k];else if(b[k]&&typeof b[k]==="object"&&!Array.isArray(b[k]))d[k]=Object.assign({},b[k],d[k]);}if(!Array.isArray(d.itens))d.itens=[];return d;}
+function normSol(d){const b=blankSol();for(const k of Object.keys(b)){if(d[k]==null)d[k]=b[k];else if(b[k]&&typeof b[k]==="object"&&!Array.isArray(b[k]))d[k]=Object.assign({},b[k],d[k]);}if(!Array.isArray(d.itens))d.itens=[];d.itens.forEach(i=>{i.un=unNorm(i.un);});return d;}
 function solEditavel(){
   if(!sCur||!sMeta) return false;
   if(ehSolic(sMeta)&&["rascunho","aguardando"].includes(sMeta.status)) return true;
@@ -1348,7 +1353,12 @@ function badgesSol(){
 }
 async function carregarSols(abrir){
   document.querySelectorAll("#solCaixas [data-sx]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.sx===solCx?"true":"false"));
-  try{ sols=await api("GET","sol?caixa="+solCx); }catch(e){ falha(e); return; }
+  try{ sols=await api("GET","sol?caixa="+solCx); }catch(e){
+    falha(e); const el=$("#solLista"); if(!el||!ME) return;
+    const velho=e&&e.status===404;
+    el.innerHTML=`<p class="err" style="font-size:13px;margin:4px">${velho?"O Apps Script publicado ainda é a versão antiga, sem Solicitações. No editor do Apps Script: <b>Implantar › Gerenciar implantações › lápis › Versão: Nova versão › Implantar</b>. Depois recarregue esta página.":"Não foi possível carregar: "+esc(e&&e.message||"erro")+" <button class=\"btn\" id=\"solTentar\">Tentar de novo</button>"}</p>`;
+    const b=$("#solTentar"); if(b) b.onclick=()=>carregarSols(abrir);
+    return; }
   if(!ME) return;
   listaSol();
   if(abrir){ const alvo=sols[0]; if(alvo) await abrirSol(alvo.id); else {sCur=null;sMeta=null;edSol();} }
@@ -1358,9 +1368,9 @@ function listaSol(){
   const it=sols.filter(s=>!q||norm([s.numero,s.cliente,s.unidade,s.empresa,s.solicitante].join(" ")).includes(q));
   if(!it.length){el.innerHTML=`<p class="muted" style="font-size:13px;margin:4px">${q?"Nada encontrado.":{minhas:"Nenhuma solicitação ainda. Clique em <b>+ Nova</b>.",novas:"Nenhuma solicitação nova.",andamento:"Nada em andamento.",respondidas:"Nenhuma respondida ainda.",todas:"Nenhuma solicitação."}[solCx]}</p>`;return;}
   el.innerHTML=it.map(s=>`<button class="opitem ${sCur&&s.id===sCur.id?"on":""}" data-id="${s.id}">
-    <b>${esc(s.numero||"")} · ${esc(s.cliente||"Sem cliente")}</b><em class="pill ${SOL_PILL[s.status]}">${SOL_LABEL[s.status]}</em>
+    <b>${ehEmail(s)?'<span title="Recebida por e-mail">✉</span> ':""}${esc(s.numero||"")} · ${esc(s.cliente||s.assunto||"Sem cliente")}</b><em class="pill ${SOL_PILL[s.status]}">${SOL_LABEL[s.status]}</em>
     <span>${esc(s.unidade||"—")}${s.cidade?" · "+esc(s.cidade):""} · ${s.itens} item(ns)</span>
-    <span>${solCx!=="minhas"?esc(s.empresa||s.solicitante)+" · ":""}${s.tipo==="projeto"?"Projeto":"Orçamento"} · até ${s.dataNecessidade?new Date(s.dataNecessidade+"T12:00").toLocaleDateString("pt-BR"):"—"}</span></button>`).join("");
+    <span>${solCx!=="minhas"?esc(s.empresa||s.solicitante||s.emailDe)+" · ":""}${s.tipo==="projeto"?"Projeto":"Orçamento"} · até ${s.dataNecessidade?new Date(s.dataNecessidade+"T12:00").toLocaleDateString("pt-BR"):"—"}</span></button>`).join("");
 }
 
 /* ---------- abrir / criar / salvar ---------- */
@@ -1387,7 +1397,7 @@ function flushSol(){
     $("#solSave").textContent="Salvando…";
     try{ const r=await api("PUT","sol/"+d.id,{dados:d,versao:m.versao||0}); m.versao=r.versao; m.status=r.status; m.numero=r.numero; delete m.novo;
       $("#solSave").textContent="Salvo na planilha às "+new Date().toLocaleTimeString("pt-BR").slice(0,5)+".";
-      const i=sols.findIndex(x=>x.id===d.id), res={id:d.id,numero:r.numero,status:r.status,cliente:d.cliente.nome,unidade:d.cliente.unidade,cidade:[d.cliente.cidade,d.cliente.uf].filter(Boolean).join("/"),
+      const i=sols.findIndex(x=>x.id===d.id), res={id:d.id,numero:r.numero,status:r.status,cliente:d.cliente.nome,origem:m.origem,assunto:m.assunto,emailDe:m.emailDe,unidade:d.cliente.unidade,cidade:[d.cliente.cidade,d.cliente.uf].filter(Boolean).join("/"),
         itens:d.itens.filter(x=>x.codigo||x.descricao).length,tipo:d.tipo,dataNecessidade:d.dataNecessidade,empresa:m.empresa,solicitante:m.solicitante,solicitanteId:m.solicitanteId,atualizado:Date.now()};
       if(i>=0) Object.assign(sols[i],res); else sols.unshift(res); listaSol();
       const h=$("#solNum"); if(h&&r.numero) h.textContent=r.numero;
@@ -1423,7 +1433,9 @@ function edSol(){
   <div class="pane" id="solPane">
    <header><span class="eyebrow">${m.novo?"Nova solicitação":`<span id="solNum">${esc(m.numero||"")}</span> · ${SOL_LABEL[m.status]}`}</span>
      <h2>${d.tipo==="projeto"?"Solicitação de projeto":"Solicitação de orçamento"}${d.cliente.nome?" · "+esc(d.cliente.nome):""}</h2>
-     ${m.empresa||m.solicitante?`<p class="muted" style="margin:0">Pedido por <b>${esc(m.solicitante||ME.nome)}</b>${m.empresa?" · "+esc(m.empresa):""}${m.enviadoEm?" · enviado em "+fmtDH(m.enviadoEm):""}${m.responsavel?" · com "+esc(m.responsavel):""}</p>`:""}</header>
+     ${ehEmail(m)?`<p class="muted" style="margin:0">✉ Recebida por e-mail de <b>${esc(m.solicitante||m.emailDe)}</b> (${esc(m.emailDe)}) · “${esc(m.assunto)}” · ${fmtDH(m.enviadoEm)}${m.responsavel?" · com "+esc(m.responsavel):""}</p>
+       ${ehInterno()&&!d.cliente.nome?'<p class="note warn" style="margin:6px 0 0;font-size:13px">Complete o <b>cliente</b> e a <b>unidade</b> a partir do e-mail (texto em Descrição, no item 5). As respostas vão por e-mail para quem enviou, no mesmo histórico.</p>':""}`
+     :m.empresa||m.solicitante?`<p class="muted" style="margin:0">Pedido por <b>${esc(m.solicitante||ME.nome)}</b>${m.empresa?" · "+esc(m.empresa):""}${m.enviadoEm?" · enviado em "+fmtDH(m.enviadoEm):""}${m.responsavel?" · com "+esc(m.responsavel):""}</p>`:""}</header>
 
    <section class="bloco"><h3>1. O que você precisa</h3>
     <div class="choice">
@@ -1457,7 +1469,7 @@ function edSol(){
     <div class="row"><button class="btn small" id="sAddIt">+ Item</button><button class="btn small ghost" id="sColar">Colar lista do Excel</button>
       <span class="muted" style="font-size:12px">${d.itens.filter(i=>i.codigo||i.descricao||i.ref).length} item(ns)</span></div>
     <div id="sColarBox" hidden><div class="f"><label for="sColarTxt">Uma linha por item: código (ou marca/modelo) e quantidade</label>
-      <textarea id="sColarTxt" class="mono" style="min-height:90px" placeholder="LC1D18M7 10&#10;GV2ME10 5&#10;ATV320U22N4B 2"></textarea></div>
+      <textarea id="sColarTxt" class="mono" style="min-height:90px" placeholder="LC1D18M7 10&#10;GV2ME10 5 pc&#10;Cabo PP 3x2,5 100 m"></textarea></div>
       <div class="row"><button class="btn small pri" id="sColarOk">Adicionar à lista</button><label class="check"><input type="checkbox" id="sColarEq"> São de outra marca (equivalência)</label></div></div>
    </section>
 
@@ -1477,7 +1489,7 @@ function edSol(){
    ${resp||interno?blocoResposta():""}
    <div id="sFluxo"></div>
    <div class="card fluxo" data-keep><h3>Histórico e conversa</h3><div id="sHist" class="hist"><span class="muted">${m.novo?"Ainda não salva.":"Carregando…"}</span></div>
-     ${m.novo?"":`<div class="row"><input type="text" id="sCmt" placeholder="Escrever uma mensagem para ${dono&&!interno?"a equipe S2I":"o integrador"}" style="flex:1;min-width:200px"><button class="btn small" id="sCmtB">Enviar mensagem</button></div>`}</div>
+     ${m.novo?"":`<div class="row"><input type="text" id="sCmt" placeholder="Escrever uma mensagem para ${dono&&!interno?"a equipe S2I":ehEmail(m)?"o histórico (não vai por e-mail)":"o integrador"}" style="flex:1;min-width:200px"><button class="btn small" id="sCmtB">Enviar mensagem</button></div>`}</div>
   </div>`;
   ligarSol();
   fluxoSol();
@@ -1486,7 +1498,7 @@ function edSol(){
 }
 function bannerSol(){
   const m=sMeta; if(!m||m.novo) return "";
-  if(m.status==="aguardando") return `<div class="note bad banner"><b>${ehSolic(m)?"A equipe S2I precisa de mais informações.":"Aguardando o integrador."}</b> <span id="sPedido"></span>${ehSolic(m)?" Complete abaixo e clique em <b>Enviar informações</b>.":""}</div>`;
+  if(m.status==="aguardando") return `<div class="note bad banner"><b>${ehSolic(m)?"A equipe S2I precisa de mais informações.":ehEmail(m)?"Aguardando resposta de "+esc(m.solicitante||m.emailDe)+" por e-mail.":"Aguardando o integrador."}</b> <span id="sPedido"></span>${ehSolic(m)?" Complete abaixo e clique em <b>Enviar informações</b>.":""}</div>`;
   if(m.status==="respondida") return `<div class="note banner"><b>Respondida</b> em ${fmtDH(m.respondidoEm)}${m.responsavel?" por "+esc(m.responsavel):""}. Veja a resposta abaixo.</div>`;
   if(m.status==="enviada") return `<div class="note warn banner"><b>Nova.</b> ${ehSolic(m)?"A equipe S2I recebeu e vai analisar.":"Ainda ninguém assumiu."}</div>`;
   if(m.status==="em_andamento") return `<div class="note warn banner"><b>Em andamento</b>${m.responsavel?" com "+esc(m.responsavel):""}.</div>`;
@@ -1509,7 +1521,7 @@ function blocoResposta(){
     <div class="resp">${esc(r.texto||"").replace(/\n/g,"<br>")}</div>
     <dl class="kv">${r.valor?`<dt>Valor</dt><dd><b>${BRL(r.valor)}</b></dd>`:""}${r.validade?`<dt>Validade</dt><dd>${new Date(r.validade+"T12:00").toLocaleDateString("pt-BR")}</dd>`:""}${r.prazo?`<dt>Prazo de entrega</dt><dd>${esc(r.prazo)}</dd>`:""}<dt>Respondido por</dt><dd>${esc(r.por||"")} · ${fmtDH(r.em)}</dd></dl>
     <div class="anexos" id="sAnxResp">${listaAnexos("resposta")}</div></section>`;
-  return `<section class="bloco resposta" data-keep><h3>Resposta ao integrador</h3>
+  return `<section class="bloco resposta" data-keep><h3>${ehEmail(sMeta)?"Resposta por e-mail <span class=\"muted\" style=\"font-size:13px;font-weight:400\">vai para "+esc(sMeta.emailDe)+", no mesmo histórico do e-mail</span>":"Resposta ao integrador"}</h3>
     ${podeResp?`<div class="grid">
       <div class="f full"><label for="rTxt">Resposta<span class="req">*</span></label><textarea id="rTxt" style="min-height:90px" placeholder="Ex.: Segue cotação em anexo. Itens 3 e 4 com equivalente Schneider LC1D25M7…">${esc(r.texto||"")}</textarea></div>
       <div class="f"><label for="rVal">Valor total (R$)</label><input type="number" id="rVal" min="0" step="0.01" value="${r.valor||""}"></div>
@@ -1542,7 +1554,7 @@ function fluxoSol(){
       ${st==="respondida"?'<button class="btn small" id="sGanha">Fechada (ganha)</button><button class="btn small ghost" id="sPerdida">Perdida</button>':""}
       ${["respondida","ganha","perdida","cancelada"].includes(st)?'<button class="btn small ghost" id="sReabrir">Reabrir</button>':""}
       ${abertas?'<button class="btn small ghost danger" id="sCancelar">Cancelar</button>':""}</div>
-      ${["enviada","em_andamento"].includes(st)?`<details><summary>Pedir mais informações ao integrador</summary><div class="f" style="margin-top:8px"><textarea id="sInfoTxt" style="min-height:60px" placeholder="Ex.: mande foto da placa do motor e a tensão de comando."></textarea></div><div class="row" style="margin-top:6px"><button class="btn danger" id="sInfo">Pedir informações</button></div></details>`:""}</div>`;
+      ${["enviada","em_andamento"].includes(st)?`<details><summary>${ehEmail(m)?"Pedir mais informações (por e-mail para "+esc(m.emailDe)+")":"Pedir mais informações ao integrador"}</summary><div class="f" style="margin-top:8px"><textarea id="sInfoTxt" style="min-height:60px" placeholder="Ex.: mande foto da placa do motor e a tensão de comando."></textarea></div><div class="row" style="margin-top:6px"><button class="btn danger" id="sInfo">Pedir informações</button></div></details>`:""}</div>`;
   }
   box.innerHTML=h;
   const on=(id,fn)=>{const b=$("#"+id);if(b)b.onclick=fn;};
@@ -1554,7 +1566,7 @@ function fluxoSol(){
   on("sGanha",async()=>{const r=await acaoSol("ganha");if(r){toast("Marcada como fechada (ganha)");edSol();}});
   on("sPerdida",async()=>{const r=await acaoSol("perdida");if(r){toast("Marcada como perdida");edSol();}});
   on("sReabrir",async()=>{const r=await acaoSol("reabrir");if(r){toast("Reaberta");edSol();}});
-  on("sInfo",async()=>{const t=$("#sInfoTxt").value.trim();if(!t){toast("Escreva o que precisa");return;}const r=await acaoSol("pedir_info",{texto:t});if(r){toast("Pedido enviado ao integrador");edSol();}});
+  on("sInfo",async()=>{const t=$("#sInfoTxt").value.trim();if(!t){toast("Escreva o que precisa");return;}const r=await acaoSol("pedir_info",{texto:t});if(r){toast(ehEmail(sMeta)?"Pedido enviado por e-mail":"Pedido enviado ao integrador");edSol();}});
   on("sCriarOp",criarOpDaSol);
 }
 function ligarSol(){
@@ -1580,7 +1592,7 @@ function ligarSol(){
     sTouch(); if(k==="modo"||k==="codigo") edSol(); else fluxoSolLeve();});
   tb.addEventListener("input",e=>{const tr=e.target.closest("tr[data-k]");if(!tr)return;const it=sCur.itens[+tr.dataset.k],k=e.target.dataset.i;if(["descricao","obs","ref"].includes(k)){it[k]=e.target.value;sTouch();}});
   tb.addEventListener("click",e=>{if(e.target.dataset.i!=="del")return;sCur.itens.splice(+e.target.closest("tr").dataset.k,1);sTouch();edSol();});
-  const add=$("#sAddIt"); if(add) add.onclick=()=>{const ult=sCur.itens[sCur.itens.length-1];sCur.itens.push({modo:ult?ult.modo:"codigo",codigo:"",ref:"",descricao:"",qtd:1,un:"pç",obs:""});sTouch();edSol();
+  const add=$("#sAddIt"); if(add) add.onclick=()=>{const ult=sCur.itens[sCur.itens.length-1];sCur.itens.push({modo:ult?ult.modo:"codigo",codigo:"",ref:"",descricao:"",qtd:1,un:"pc",obs:""});sTouch();edSol();
     const l=$("#sItens tr:last-child input[type=text]");if(l)l.focus();};
   const col=$("#sColar"); if(col) col.onclick=()=>{$("#sColarBox").hidden=!$("#sColarBox").hidden;$("#sColarTxt").focus();};
   const cok=$("#sColarOk"); if(cok) cok.onclick=async()=>{
@@ -1589,17 +1601,17 @@ function ligarSol(){
     const cat=sCur.fabricanteId?await getCat(sCur.fabricanteId).catch(()=>null):null;
     sCur.itens=sCur.itens.filter(i=>i.codigo||i.descricao||i.ref);
     linhas.forEach(l=>{
-      let qtd=1, txt=l; const mq=l.match(/^(.*?)[\t; ]+(\d+(?:[.,]\d+)?)\s*(\w{1,4})?\s*$/); if(mq){txt=mq[1].trim();qtd=parseFloat(mq[2].replace(",","."))||1;}
-      if(eq) sCur.itens.push({modo:"equivalencia",codigo:"",ref:txt,descricao:"",qtd,un:"pç",obs:""});
+      let qtd=1, txt=l, un="pc"; const mq=l.match(/^(.*?)[\t; ]+(\d+(?:[.,]\d+)?)\s*([A-Za-zçÇ]{1,6})?\.?\s*$/); if(mq){txt=mq[1].trim();qtd=parseFloat(mq[2].replace(",","."))||1;if(mq[3])un=unNorm(mq[3]);}
+      if(eq) sCur.itens.push({modo:"equivalencia",codigo:"",ref:txt,descricao:"",qtd,un,obs:""});
       else{ const cod=txt.split(/\s+/)[0].toUpperCase(), resto=txt.slice(cod.length).trim(); let desc=resto, achado=false;
         if(cat){const i=cat.idx.get(cod);if(i!=null){achado=true;if(!desc)desc=cat.rows[i][1];}}
-        sCur.itens.push({modo:"codigo",codigo:cod,ref:"",descricao:desc,qtd,un:"pç",obs:"",achado}); }});
+        sCur.itens.push({modo:"codigo",codigo:cod,ref:"",descricao:desc,qtd,un,obs:"",achado}); }});
     sTouch(); edSol(); toast(linhas.length+" item(ns) adicionados");};
   const f=$("#sFile"); if(f) f.onchange=e=>{enviarArquivos([...e.target.files],"pedido",$("#sUp"));e.target.value="";};
   const rf=$("#rFile"); if(rf) rf.onchange=e=>{enviarArquivos([...e.target.files],"resposta",$("#rUp"));e.target.value="";};
   const re=$("#rEnviar"); if(re) re.onclick=async()=>{const t=$("#rTxt").value.trim();if(!t){toast("Escreva a resposta");$("#rTxt").focus();return;}
     const r=await acaoSol("responder",{resposta:{texto:t,valor:+$("#rVal").value||null,validade:$("#rValid").value,prazo:$("#rPrazo").value}});
-    if(r){ sCur.resposta={texto:t,valor:+$("#rVal").value||null,validade:$("#rValid").value,prazo:$("#rPrazo").value,por:ME.nome,em:Date.now()}; toast("Resposta enviada. O integrador foi avisado por e-mail."); edSol(); }};
+    if(r){ sCur.resposta={texto:t,valor:+$("#rVal").value||null,validade:$("#rValid").value,prazo:$("#rPrazo").value,por:ME.nome,em:Date.now()}; toast(ehEmail(sMeta)?"Resposta enviada por e-mail para "+sMeta.emailDe:"Resposta enviada. O integrador foi avisado por e-mail."); edSol(); }};
   p.addEventListener("click",async e=>{
     const b=e.target.closest("[data-ab],[data-av],[data-ar]"); if(!b) return;
     const id=b.dataset.ab||b.dataset.av||b.dataset.ar, a=sAnexos.find(x=>x.id===id); if(!a) return;
@@ -1680,6 +1692,53 @@ async function exportarSols(){
     "Enviada em":dt(s.enviadoEm),"Responsável":s.responsavel,"Respondida em":dt(s.respondidoEm),"Valor (R$)":r.valor||"","Validade":dd(r.validade),"Oportunidade":s.oportunidadeId?"sim":"","Descrição":d.descricao||""};});
   const its=[]; L.forEach(s=>((s.dados||{}).itens||[]).forEach(i=>{if(i.codigo||i.ref||i.descricao)its.push({"Nº":s.numero,"Cliente":s.cliente,"Unidade":s.unidade,"Tipo":i.modo==="equivalencia"?"Equivalência":"Código","Código":i.codigo||"","Marca/modelo atual":i.ref||"","Descrição":i.descricao||"","Qtd":+i.qtd||0,"Un.":i.un||"","Observação":i.obs||""});}));
   xlsxBaixar([["Solicitações",rows.length?rows:[["Nenhuma"]]],["Itens",its.length?its:[["Nenhum"]]]],"solicitacoes_"+solCx+"_"+new Date().toISOString().slice(0,10)+".xlsx");
+}
+
+
+/* ===================== CONFIGURAÇÕES (administrador) ===================== */
+async function renderConfig(){
+  const v=$("#view-cfg"); v.innerHTML=`<div class="card"><p class="muted">Carregando…</p></div>`;
+  let c; try{ c=await api("GET","config"); }catch(e){ v.innerHTML=`<div class="card"><p class="err">${e&&e.status===404?"O Apps Script publicado ainda é a versão antiga. Publique a nova versão (Implantar › Gerenciar implantações › lápis › Nova versão).":esc(e.message||"Erro")}</p></div>`; return; }
+  desenharConfig(c);
+}
+function desenharConfig(c,msg){
+  const v=$("#view-cfg"), ok=(b,t,f)=>`<span class="pill ${b?"concluida":"devolvida"}">${b?t:f}</span>`;
+  const proprio=c.contaDona&&c.emailMonitorado&&[c.contaDona.toLowerCase(),...(c.aliases||[]).map(a=>a.toLowerCase())].includes(c.emailMonitorado.toLowerCase());
+  v.innerHTML=`<div class="cfg">
+  <div class="card"><h2 style="margin-top:0">E-mails das solicitações</h2>
+   ${msg?`<div class="note ${msg.bad?"bad":""}">${msg.t}</div>`:""}
+   <div class="grid">
+    <div class="f"><label for="cDest">E-mail que recebe as solicitações</label><input id="cDest" type="email" value="${esc(c.emailDestino||"")}" placeholder="orcamento@s2i.com.br">
+      <span class="hint">Cada solicitação enviada pela plataforma vai para este e-mail. Pedidos de informação e a resposta seguem no mesmo histórico (mesma conversa de e-mail).</span></div>
+    <div class="f"><label for="cMon">E-mail monitorado</label><input id="cMon" type="email" value="${esc(c.emailMonitorado||"")}" placeholder="orcamento@s2i.com.br">
+      <span class="hint">Os e-mails que chegarem neste endereço viram solicitações <b>Novas</b> (pendentes) na plataforma, com o texto e os anexos. A resposta volta para quem mandou, no mesmo histórico.</span></div>
+    <div class="f"><label class="check"><input type="checkbox" id="cAtivo" ${c.monitorAtivo?"checked":""}> Ler a caixa automaticamente</label>
+      <div class="row" style="margin-top:6px"><span class="muted" style="font-size:13px">a cada</span><select id="cInt" style="width:auto">${[1,5,10,15,30].map(n=>`<option value="${n}" ${n===c.intervalo?"selected":""}>${n} min</option>`).join("")}</select></div></div>
+    <div class="f"><label for="cRetro">Ao ligar ou trocar o e-mail monitorado, importar também</label><select id="cRetro"><option value="0">Só os e-mails que chegarem daqui pra frente</option><option value="1">E-mails do último dia</option><option value="3">Dos últimos 3 dias</option><option value="7">Dos últimos 7 dias</option><option value="30">Dos últimos 30 dias</option></select></div>
+    <div class="f full"><label class="check"><input type="checkbox" id="cAvis" ${c.avisarSolicitante?"checked":""}> Avisar o representante/integrador por e-mail (pedido de informação e resposta das solicitações feitas na plataforma)</label></div>
+   </div>
+   <div class="row"><button class="btn pri" id="cSalvar">Salvar</button><button class="btn" id="cTeste">Enviar e-mail de teste</button><button class="btn" id="cVarrer" ${c.emailMonitorado?"":"disabled"}>Verificar a caixa agora</button></div>
+  </div>
+  <div class="card"><h3 style="margin-top:0">Situação</h3>
+   <dl class="kv">
+    <dt>Conta Google do sistema</dt><dd>${esc(c.contaDona||"—")}${(c.aliases||[]).length?` <span class="muted">· também envia como ${c.aliases.map(esc).join(", ")}</span>`:""}</dd>
+    <dt>Acesso ao Gmail</dt><dd>${ok(c.gmailOk,"autorizado","falta autorizar")} ${c.gmailOk?"":`<span class="muted">${esc(c.gmailMsg||"")}</span>`}</dd>
+    <dt>Mesmo histórico de e-mail</dt><dd>${ok(c.gmailApi,"ativo","desligado")} ${c.gmailApi?"":'<span class="muted">No Apps Script: <b>Serviços › + › Gmail API › Adicionar</b>, depois publique nova versão. Sem isso os e-mails saem avulsos.</span>'}</dd>
+    <dt>Leitura automática</dt><dd>${ok(c.gatilho,"ligada a cada "+c.intervalo+" min","desligada")}${c.monitorAtivo&&c.desde?` <span class="muted">· e-mails desde ${fmtDH(c.desde)}</span>`:""}</dd>
+    <dt>Última verificação</dt><dd>${c.ultimaVarredura?fmtDH(c.ultimaVarredura)+" · "+esc(c.erroVarredura?"erro: "+c.erroVarredura:c.resultado):"ainda não verificou"}</dd>
+    ${c.erroEmail?`<dt>Último erro de envio</dt><dd class="err">${fmtDH(+c.erroEmail.split("|")[0])} · ${esc(c.erroEmail.split("|").slice(1).join("|"))}</dd>`:""}
+   </dl>
+   ${c.emailMonitorado&&!proprio?`<div class="note warn" style="font-size:13px">O sistema lê a caixa da conta <b>${esc(c.contaDona||"dona da planilha")}</b>. Para ele ver os e-mails de <b>${esc(c.emailMonitorado)}</b>, configure no e-mail ${esc(c.emailMonitorado)} o <b>encaminhamento automático</b> para ${esc(c.contaDona||"essa conta")} (ou use como conta dona a própria ${esc(c.emailMonitorado)}). Para as respostas saírem como ${esc(c.emailMonitorado)}, adicione esse endereço em Gmail › Configurações › Contas › "Enviar e-mail como".</div>`:""}
+   <p class="muted" style="font-size:12px;margin:8px 0 0">E-mails enviados pela própria conta do sistema não viram solicitação. Os e-mails importados ganham o marcador "S2I/Solicitação importada" no Gmail.</p>
+  </div></div>`;
+  const val=()=>({emailDestino:$("#cDest").value.trim(),emailMonitorado:$("#cMon").value.trim(),monitorAtivo:$("#cAtivo").checked,intervalo:+$("#cInt").value,retroativoDias:+$("#cRetro").value||0,avisarSolicitante:$("#cAvis").checked});
+  $("#cSalvar").onclick=async()=>{const b=$("#cSalvar");b.disabled=true;b.textContent="Salvando…";
+    try{const r=await api("PUT","config",val());desenharConfig(r,{t:r.aviso||"Configurações salvas.",bad:!!r.aviso});}catch(e){desenharConfig(Object.assign(c,val()),{t:esc(e.message),bad:true});}};
+  $("#cTeste").onclick=async()=>{const b=$("#cTeste");b.disabled=true;b.textContent="Enviando…";
+    try{await api("POST","config/testar",{});toast("E-mail de teste enviado para "+c.emailDestino);}catch(e){falha(e);}b.disabled=false;b.textContent="Enviar e-mail de teste";};
+  $("#cVarrer").onclick=async()=>{const b=$("#cVarrer");b.disabled=true;b.textContent="Verificando…";
+    try{const r=await api("POST","config/varrer",{});const x=r.varredura||{};desenharConfig(r,x.erro?{t:"Não consegui verificar: "+esc(x.erro),bad:true}:{t:`Verificado: ${x.novas||0} solicitação(ões) nova(s) e ${x.respostas||0} resposta(s) por e-mail.`});contagem();}
+    catch(e){falha(e);b.disabled=false;b.textContent="Verificar a caixa agora";}};
 }
 
 /* ===================== POP ===================== */

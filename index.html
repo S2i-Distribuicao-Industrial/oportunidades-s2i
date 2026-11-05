@@ -223,6 +223,12 @@ a{color:var(--accent)}
 .lglogo{display:block;width:100%;max-width:300px;height:auto;margin:0 auto 6px}
 .top .brand img{align-self:center;width:28px;height:28px;border-radius:7px;flex:none}
 
+#tabs .tabmenu{display:none}
+.cfg{display:grid;gap:16px;grid-template-columns:minmax(0,3fr) minmax(0,2fr);align-items:start}
+@media (max-width:900px){.cfg{grid-template-columns:1fr}}
+.cfg .kv{grid-template-columns:max-content 1fr}
+.cfg>.card{padding:18px 20px}
+
 </style>
 </head>
 <body>
@@ -250,10 +256,11 @@ a{color:var(--accent)}
     <button role="tab" data-view="fab" data-perm="fabricantes" aria-selected="false">Fabricantes</button>
     <button role="tab" data-view="usr" data-perm="usuarios" aria-selected="false">Usuários</button>
     <button role="tab" data-view="pop" data-interno aria-selected="false">POP</button>
+    <button role="tab" data-view="cfg" data-perm="usuarios" class="tabmenu" aria-selected="false">Configurações</button>
     <button role="tab" data-view="bm" data-perm="lancar" aria-selected="false">Extensão <span id="extChip" class="pill rascunho">verificando</span></button>
   </nav>
   <details class="me" id="meMenu"><summary><span><b id="meNome"></b><small id="mePapel"></small></span></summary>
-    <div class="menu"><button class="btn small ghost" id="btnSenha">Trocar senha</button><button class="btn small ghost" id="btnSair">Sair</button></div></details>
+    <div class="menu"><button class="btn small ghost" id="btnCfg" data-perm="usuarios">Configurações</button><button class="btn small ghost" id="btnSenha">Trocar senha</button><button class="btn small ghost" id="btnSair">Sair</button></div></details>
 </div></header>
 
 <div class="wrap">
@@ -277,6 +284,7 @@ a{color:var(--accent)}
   <section data-pane="usr" id="view-usr" hidden></section>
   <section data-pane="pop" id="view-pop" hidden></section>
   <section data-pane="bm" id="view-bm" hidden></section>
+  <section data-pane="cfg" id="view-cfg" hidden></section>
 </div>
 </div>
 <div class="modal" id="modal" hidden></div>
